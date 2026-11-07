@@ -215,8 +215,8 @@ class MainTest {
     void sqlErrorResultFollowsExceptionChain() throws Throwable {
         SQLException first = new SQLException("first", "42000", 1);
         first.setNextException(new SQLException("second", "HY000", 2));
-        ObjectNode out = (ObjectNode) call("sqlErrorResult", new Class<?>[] { SQLException.class, long.class },
-                first, System.nanoTime());
+        ObjectNode out = (ObjectNode) call("sqlErrorResult", new Class<?>[] { sessionClass(), SQLException.class, long.class },
+                null, first, System.nanoTime());
         assertEquals("error", out.get("kind").asText());
         assertTrue(out.get("columns").isEmpty());
         assertTrue(out.get("rows").isEmpty());
