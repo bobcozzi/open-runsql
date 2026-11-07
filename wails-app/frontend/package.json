@@ -14,5 +14,8 @@
         "typescript": "^7.0.2",
         "vite": "^5.4.11",
         "vitest": "^3.2.7"
+    },
+    "dependencies": {
+        "@wailsio/runtime": "^3.1.0"
     }
 }

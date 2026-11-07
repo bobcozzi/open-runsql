@@ -78,7 +78,10 @@ export interface ConnectionProfile {
     lastUsedAt?: number;
 }
 
-// Wails-bound App facade.
+// Wails v3: the App service is exposed via generated bindings
+// (frontend/bindings/.../wails-app/app.js). App() returns the module.
+import * as appBindings from "../bindings/github.com/BobCozzi/open-runsql/wails-app/app.js";
+
 export interface AppBinding {
     Connect(req: unknown): Promise<ConnectResponse>;
     Disconnect(connectionId: string): Promise<void>;
@@ -89,15 +92,18 @@ export interface AppBinding {
     ListConnectionProfiles(): Promise<ConnectionProfile[]>;
     SaveConnectionProfile(p: ConnectionProfile): Promise<void>;
     DeleteConnectionProfile(name: string): Promise<void>;
+    DetachConnection(connectionId: string, title: string): Promise<void>;
+    AttachConnection(connectionId: string): Promise<void>;
+    ListDetached(): Promise<string[]>;
+    GetWorkspace(connectionId: string): Promise<unknown>;
+    ListWorkspaces(): Promise<unknown[]>;
+    UpdateEditorText(connectionId: string, text: string): Promise<void>;
+    UpdateMessagesHTML(connectionId: string, html: string): Promise<void>;
+    UpdateStatusText(connectionId: string, text: string): Promise<void>;
+    DetachedConnectionID(): Promise<string>;
     Version(): Promise<string>;
 }
 
-declare global {
-    interface Window {
-        go?: { main?: { App?: AppBinding } };
-    }
-}
-
-export function App(): AppBinding | undefined {
-    return window.go?.main?.App;
+export function App(): AppBinding {
+    return appBindings as unknown as AppBinding;
 }

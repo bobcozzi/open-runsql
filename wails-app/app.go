@@ -13,7 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cozziresearch/ibmi-jdbc-bridge-starter/wails-app/internal/bridge"
+	"github.com/BobCozzi/open-runsql/wails-app/internal/bridge"
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 // Public request/response models exposed to the Wails frontend.
@@ -130,10 +132,10 @@ type ConnectionProfile struct {
 	LastUsedAt    int64  `json:"lastUsedAt"`
 }
 
-// App is the Wails-bound service. It owns the Java bridge process and the
+// App is the Wails v3 service. It owns the Java bridge process and the
 // per-connection state. Methods on App are callable from the frontend.
 type App struct {
-	ctx context.Context
+	app *application.App
 
 	mu     sync.Mutex
 	client *bridge.Client
@@ -141,10 +143,8 @@ type App struct {
 
 	connections map[string]*connState
 	workspace   *WorkspaceStore
-	windows     WindowManager
-	// detachConnID is set when this process is a torn-off window (--window flag):
-	// the UI locks to this connection only.
-	detachConnID string
+	// detached maps connectionId -> torn-off window (native v3 windows).
+	detached map[string]*application.WebviewWindow
 }
 
 type connState struct {
@@ -156,21 +156,19 @@ type connState struct {
 }
 
 func NewApp(jar string) *App {
-	a := &App{jar: jar, connections: map[string]*connState{}}
+	a := &App{jar: jar, connections: map[string]*connState{}, detached: map[string]*application.WebviewWindow{}}
 	a.workspace = NewWorkspaceStore(a)
-	wm, err := NewWindowManager()
-	if err == nil {
-		a.windows = wm
-	}
 	return a
 }
 
-func (a *App) startup(ctx context.Context) {
-	a.ctx = ctx
+// v3 lifecycle hooks (ServiceStartup / ServiceShutdown replace startup/shutdown).
+func (a *App) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
+	return nil
 }
 
-func (a *App) shutdown(_ context.Context) {
+func (a *App) ServiceShutdown() error {
 	a.closeClient()
+	return nil
 }
 
 func (a *App) ensureClient() (*bridge.Client, error) {
@@ -498,35 +496,63 @@ func (a *App) UpdateStatusText(connectionID, text string) {
 	})
 }
 
-// DetachConnection opens a torn-off window for a connection (child process in
-// v2; in-process app.NewWindow() when migrated to Wails v3 via WindowManager).
+// DetachConnection opens a torn-off window for a connection. Native v3: a new
+// WebviewWindow on the same process, sharing the bridge JVM and workspace
+// store. The window's frontend boots into single-connection mode via the
+// ?connection=<id> query parameter it reads at startup.
 func (a *App) DetachConnection(connectionID, title string) error {
-	if a.windows == nil {
-		return errors.New("window manager unavailable")
+	a.mu.Lock()
+	_, already := a.detached[connectionID]
+	a.mu.Unlock()
+	if already {
+		return errors.New("connection already detached")
 	}
-	return a.windows.OpenDetached(connectionID, title)
+	if a.app == nil {
+		return errors.New("application not ready")
+	}
+	w := a.app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:            title,
+		Width:            980,
+		Height:           700,
+		MinWidth:         720,
+		MinHeight:        480,
+		BackgroundColour: application.NewRGB(30, 30, 30),
+		URL:              "/?connection=" + connectionID,
+	})
+	a.mu.Lock()
+	a.detached[connectionID] = w
+	a.mu.Unlock()
+	w.OnWindowEvent(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		a.mu.Lock()
+		delete(a.detached, connectionID)
+		a.mu.Unlock()
+	})
+	w.Show()
+	return nil
 }
 
 // AttachConnection closes the torn-off window for a connection, if any.
 func (a *App) AttachConnection(connectionID string) error {
-	if a.windows == nil {
+	a.mu.Lock()
+	w, ok := a.detached[connectionID]
+	delete(a.detached, connectionID)
+	a.mu.Unlock()
+	if !ok || w == nil {
 		return nil
 	}
-	return a.windows.CloseDetached(connectionID)
+	w.Close()
+	return nil
 }
 
 // ListDetached returns connectionIds currently shown in torn-off windows.
 func (a *App) ListDetached() []string {
-	if a.windows == nil {
-		return []string{}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]string, 0, len(a.detached))
+	for id := range a.detached {
+		out = append(out, id)
 	}
-	return a.windows.ListDetached()
-}
-
-// DetachedConnectionID returns the connectionId this window is locked to, or
-// "" for the main window. The frontend reads this at boot.
-func (a *App) DetachedConnectionID() string {
-	return a.detachConnID
+	return out
 }
 
 func (a *App) setCursor(connID, cursorID string, more bool) {

@@ -207,6 +207,17 @@ function renderTabs(): void {
         btn.textContent = tab.label;
         btn.title = tab.connectionId ? "Connected" : "Not connected";
         btn.addEventListener("click", () => switchTab(tab.key));
+        if (tab.connectionId) {
+            const detach = document.createElement("span");
+            detach.className = "conn-tab-detach";
+            detach.textContent = "\u2197"; // arrow out
+            detach.title = "Detach to its own window";
+            detach.addEventListener("click", (ev) => {
+                ev.stopPropagation();
+                void detachTab(tab);
+            });
+            btn.appendChild(detach);
+        }
         const close = document.createElement("span");
         close.className = "conn-tab-close";
         close.textContent = "\u00D7";
@@ -218,6 +229,33 @@ function renderTabs(): void {
         btn.appendChild(close);
         list.appendChild(btn);
     }
+}
+
+// Detach: hand this tab's connection to a new window, close the tab here.
+async function detachTab(tab: ConnectionTab): Promise<void> {
+    if (!tab.connectionId) return;
+    const app = App();
+    try {
+        await app.DetachConnection(tab.connectionId, `${tab.label} — IBM i Run SQL`);
+    } catch (err) {
+        showMessages([], `Detach failed: ${String((err as Error)?.message ?? err)}`);
+        return;
+    }
+    // The window owns the connection now; drop the tab locally (no disconnect).
+    const idx = tabs.findIndex((t) => t.key === tab.key);
+    if (idx >= 0) {
+        tabs.splice(idx, 1);
+    }
+    if (tabs.length === 0) {
+        addTab();
+        return;
+    }
+    if (activeTabKey === tab.key) {
+        activeTabKey = tabs[Math.max(0, idx - 1)].key;
+    }
+    restoreActiveTab();
+    renderTabs();
+    syncConnectionUi();
 }
 
 function snapshotActiveTab(): void {
@@ -1158,6 +1196,10 @@ document.addEventListener("click", (ev) => {
 
 void loadProfiles();
 
+// --- Detached window mode: ?connection=<id> locks this window to that
+// connection (set by App.DetachConnection's window URL). ---
+const detachedConnId = new URLSearchParams(window.location.search).get("connection") || "";
+
 // --- Editor/results splitter (ACS-style vertical resize) ---
 (() => {
     const splitter = el<HTMLDivElement>("splitter");
@@ -1192,4 +1234,25 @@ void loadProfiles();
     });
 })();
 
-addTab();
+if (detachedConnId) {
+    // Torn-off window: single connection, no tab strip, no connect form.
+    document.getElementById("conn-tabs")!.style.display = "none";
+    els.connectPanel.hidden = true;
+    const tab: ConnectionTab = {
+        key: "detached",
+        label: "Detached",
+        connectionId: detachedConnId,
+        cursorId: null,
+        hasCursor: false,
+    };
+    tabs.push(tab);
+    activeTabKey = tab.key;
+    els.btnRun.disabled = false;
+    els.btnRunAll.disabled = false;
+    els.btnRunFrom.disabled = false;
+    els.btnPrompt.disabled = false;
+    els.badge.textContent = "Detached window";
+    els.badge.className = "badge connected";
+} else {
+    addTab();
+}

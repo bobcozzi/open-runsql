@@ -2,8 +2,6 @@ package main
 
 import (
 	"sync"
-
-	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // WorkspaceState is the per-connection workspace, owned by Go so that any
@@ -61,7 +59,7 @@ func (s *WorkspaceStore) remove(connID string) {
 
 // emitChanged pushes the current state for a connection to all windows.
 func (s *WorkspaceStore) emitChanged(connID string) {
-	if s.app.ctx == nil {
+	if s.app.app == nil {
 		return
 	}
 	s.mu.RLock()
@@ -70,7 +68,7 @@ func (s *WorkspaceStore) emitChanged(connID string) {
 	if st == nil {
 		return
 	}
-	wailsRuntime.EventsEmit(s.app.ctx, "workspace:changed:"+connID, *st)
+	s.app.app.Event.Emit("workspace:changed:"+connID, *st)
 }
 
 // Update merges a partial update and notifies subscribers.
