@@ -30,6 +30,9 @@ type Client struct {
 
 func Start(javaPath, jarPath string) (*Client, error) {
 	if javaPath == "" {
+		javaPath = os.Getenv("IBMI_JAVA")
+	}
+	if javaPath == "" {
 		javaPath = "java"
 	}
 	cmd := exec.Command(javaPath, "-jar", jarPath)

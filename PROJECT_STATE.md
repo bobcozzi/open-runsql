@@ -38,18 +38,20 @@ Architecture: Wails v3.1.0 webview UI → Go service → child-process Java jar
 
 ```sh
 cd open-runsql/wails-app
-make build && ./ibmi-run-sql        # Makefile guards CGO_LDFLAGS to Darwin
-# or: CGO_LDFLAGS="-framework UniformTypeIdentifiers" go build -tags production -o ibmi-run-sql .
+go build -tags production -o ibmi-runsql . && ./ibmi-runsql
+# or: make build && ./ibmi-runsql
 ```
 
-macOS notes: `CGO_LDFLAGS=-framework UniformTypeIdentifiers` was needed for
-Wails v2.17; verify whether v3.1 still needs it (likely not — v3 links differ).
+macOS notes: plain `go build -tags production` works on v3.1 (the old
+`CGO_LDFLAGS=-framework UniformTypeIdentifiers` workaround was Wails v2-only —
+verified unneeded on v3.1.0 on this machine, macOS 27.2 arm64, SDK 13.3).
 Wails CLI: `~/go/bin/wails3` v3.1.0. `wails3 dev` = hot reload.
 
 ## Feature state
 
 Working: multi-connection tabs (per-tab snapshots incl. editor text, deep-copied
-rows), saved connection profiles (~/.config/ibmi-run-sql/connections.json,
+rows), saved connection profiles (`os.UserConfigDir()`/ibmi-runsql/connections.json —
+  on macOS: ~/Library/Application Support/ibmi-runsql/,
 MRU order, auto-save, optional base64 password w/ checkbox, ▾ dropdown,
 right-click context menu Forget/Move-to-top), SQL grid (cl-prompter headings,
 Zoned/Dec tooltips, bigint-safe sort), CL via `CL:` prefix with message panel
@@ -58,22 +60,26 @@ Zoned/Dec tooltips, bigint-safe sort), CL via `CL:` prefix with message panel
 filtering, QUAL order, nested ELEM, multi-instance +/-, choice dropdowns with
 Other…, constraint hints; CMD/CMDSTR fields have Prompt… for NESTED prompting —
 unbounded depth, parent activation closes children), bottom tab bar
-(Results/Messages/prompter panes), Run Selected/All/From-Selected with statement
+  (Messages first, Results second — ACS order; Results still the default-focused
+  pane), Run Selected/All/From-Selected with statement
 splitter, ACS-style message log ([ ts ] action + statement + outcome + ms +
 SQLState + server job 709180/QUSER/QZDASOINIT via getServerJobIdentifier),
 ACS-style editor/results splitter.
 
-## Tear-off (in progress)
+## Tear-off
 
 DONE: Go workspace store; `DetachConnection` → `app.Window.NewWithOptions` with
 `/?connection=<id>`; detached window boots from `GetWorkspace` (editor text,
-grid, status, messages restored); main window drops the tab without
-disconnecting; `WindowClosing` cleans the map.
-OPEN: (1) detached window does not yet subscribe to `workspace:changed:<id>`
-for live updates after boot; (2) closing the main window quits detached windows
-(v3 Mac option `ApplicationShouldTerminateAfterLastWindowClosed`) — decide
-desired behavior; (3) Attach (re-absorb into main window) is bound but not
-surfaced in the UI.
+grid, status, messages restored) AND subscribes to `workspace:changed:<id>` for
+live updates (editor-text echoes skipped to protect the caret); main window
+drops the tab without disconnecting; `WindowClosing` cleans the map.
+DECIDED: closing the main window leaves detached windows open (app quits at
+last window closed; only the main window can create new connections).
+DONE: "Reattach" button in detached-window titlebar calls `AttachConnection`;
+Go emits `workspace:reattach`, the main window re-adds a bound tab restored
+from the workspace store (detached windows ignore the event).
+DONE: pane focus on detach/reattach stays on Results (no auto-switch to
+Messages; Messages tab moved first per ACS, Results remains default focus).
 
 ## Known deliberate gaps (don't "fix" by accident)
 
@@ -84,6 +90,9 @@ surfaced in the UI.
 - Batch runs: Results shows LAST statement's set; Messages accumulate per
   statement (reset on new batch, append on single runs).
 - No per-tab result history yet (ACS results list).
+- Disconnect keeps the last result set in the tab snapshot (editor-only view
+  shows; grid restores on reattach/switch). ACS RUNSQL *drops* the result set
+  on disconnect — noted as a possible future option, not a bug.
 
 ## Conventions / gotchas
 
@@ -92,12 +101,17 @@ surfaced in the UI.
 - `npm`/`go build` must run from the right dir (`wails-app/frontend` vs
   `wails-app`); several past failures were cwd-only.
 - zsh: no bare `==`/`===`; quote them.
+- Java bridge runtime: jar is class-file v69 (JDK 25) — it needs `java` ≥ 25 at
+  launch. The Go clients honor `IBMI_JAVA` (full path to the java binary) before
+  falling back to PATH. On this machine PATH `java` is Corretto 21, so run:
+  `IBMI_JAVA=~/.jdk/jdk-25.0.2/jdk-25.0.2+10/Contents/Home/bin/java ./ibmi-runsql`
+  (or package an app bundle with JAVA_HOME set).
 - User prefs: fully free-form RPG (no /FREE), no emojis in commits/PRs/code.
 - Tests: `make test` in wails-app runs Vitest + go test.
 
 ## Resume checklist
 
-1. `cd ~/Downloads/projects/open-runsql/wails-app && make build && ./ibmi-run-sql`
+1. `cd ~/Downloads/projects/open-runsql/wails-app && make build && ./ibmi-runsql`
 2. Verify tear-off visually, then wire `workspace:changed` subscription in the
    detached window boot block (frontend/src/main.ts, `detachedConnId` branch).
 3. Decide Attach UX; add button in detached window ("Reattach") calling

@@ -71,6 +71,11 @@ type SqlMessage struct {
 	SQLState   string `json:"sqlState"`
 	VendorCode int    `json:"vendorCode"`
 	Message    string `json:"message"`
+	// SecondLevelText mirrors the IBM i message-file help (Cause/Recovery)
+	// resolved by the bridge from QSQLMSG/QCPFMSG.
+	SecondLevelText string `json:"secondLevelText,omitempty"`
+	// Kind mirrors classifyMessage buckets: error/warning/info.
+	Kind string `json:"kind"`
 }
 
 type SqlResult struct {
@@ -130,7 +135,15 @@ type ConnectionProfile struct {
 	SavePassword  bool   `json:"savePassword,omitempty"`
 	PasswordB64   string `json:"passwordB64,omitempty"`
 	LastUsedAt    int64  `json:"lastUsedAt"`
+	// PinnedAt is set by "Move to top": the stable list position override.
+	PinnedAt int64 `json:"pinnedAt,omitempty"`
 }
+
+// profileOrderThreshold: at or below this many saved profiles the dropdown
+// shows a stable order (pinned first, then alphabetical) instead of MRU —
+// with only a few connections, last-used-first makes them moving targets.
+// Above the threshold the UI shows a Word-style recently-used section on top.
+const profileOrderThreshold = 5
 
 // App is the Wails v3 service. It owns the Java bridge process and the
 // per-connection state. Methods on App are callable from the frontend.
@@ -204,7 +217,7 @@ func profileStorePath() string {
 	if err != nil {
 		dir = "."
 	}
-	return filepath.Join(dir, "ibmi-run-sql", "connections.json")
+	return filepath.Join(dir, "ibmi-runsql", "connections.json")
 }
 
 func loadProfiles() ([]ConnectionProfile, error) {
@@ -219,8 +232,31 @@ func loadProfiles() ([]ConnectionProfile, error) {
 	if err := json.Unmarshal(data, &profiles); err != nil {
 		return nil, err
 	}
-	sort.SliceStable(profiles, func(i, j int) bool { return profiles[i].LastUsedAt > profiles[j].LastUsedAt })
+	sortProfiles(profiles)
 	return profiles, nil
+}
+
+// sortProfiles orders profiles for the dropdown:
+//   - Pinned (Move-to-top) entries always come first, most recently pinned first.
+//   - With <= profileOrderThreshold profiles, the rest keep creation order (FILO:
+//     first saved stays first; new connections append) so a handful of
+//     connections never becomes a moving target.
+//   - Above the threshold, the rest stay MRU (LastUsedAt desc); the frontend
+//     splits that into recently-used (top 5) + separator + remainder.
+func sortProfiles(profiles []ConnectionProfile) {
+	sort.SliceStable(profiles, func(i, j int) bool {
+		pi, pj := profiles[i].PinnedAt, profiles[j].PinnedAt
+		if (pi > 0) != (pj > 0) {
+			return pi > 0
+		}
+		if pi > 0 && pj > 0 {
+			return pi > pj
+		}
+		if len(profiles) <= profileOrderThreshold {
+			return false // keep file (creation) order
+		}
+		return profiles[i].LastUsedAt > profiles[j].LastUsedAt
+	})
 }
 
 func saveProfiles(profiles []ConnectionProfile) error {
@@ -240,7 +276,8 @@ func (a *App) ListConnectionProfiles() ([]ConnectionProfile, error) {
 	return loadProfiles()
 }
 
-// SaveConnectionProfile upserts a profile keyed by host+user, MRU-first.
+// SaveConnectionProfile upserts a profile keyed by host+user, refreshing
+// LastUsedAt; list ordering is decided by sortProfiles at read time.
 func (a *App) SaveConnectionProfile(p ConnectionProfile) error {
 	p.Host = strings.TrimSpace(p.Host)
 	if p.Host == "" {
@@ -286,6 +323,21 @@ func (a *App) DeleteConnectionProfile(name string) error {
 		}
 	}
 	return saveProfiles(out)
+}
+
+// MoveConnectionProfileToTop pins a profile at the top of the dropdown.
+func (a *App) MoveConnectionProfileToTop(name string) error {
+	profiles, err := loadProfiles()
+	if err != nil {
+		return err
+	}
+	for i, p := range profiles {
+		if strings.EqualFold(p.Name, name) || strings.EqualFold(p.Host, name) {
+			profiles[i].PinnedAt = time.Now().Unix()
+			return saveProfiles(profiles)
+		}
+	}
+	return errors.New("profile not found: " + name)
 }
 
 // Connect opens a new JDBC connection to the IBM i.
@@ -531,7 +583,8 @@ func (a *App) DetachConnection(connectionID, title string) error {
 	return nil
 }
 
-// AttachConnection closes the torn-off window for a connection, if any.
+// AttachConnection closes the torn-off window for a connection, if any, and
+// asks the main window to re-absorb it as a tab (ignored by detached windows).
 func (a *App) AttachConnection(connectionID string) error {
 	a.mu.Lock()
 	w, ok := a.detached[connectionID]
@@ -539,6 +592,9 @@ func (a *App) AttachConnection(connectionID string) error {
 	a.mu.Unlock()
 	if !ok || w == nil {
 		return nil
+	}
+	if a.app != nil {
+		a.app.Event.Emit("workspace:reattach", map[string]string{"connectionId": connectionID})
 	}
 	w.Close()
 	return nil
@@ -649,12 +705,17 @@ func decodeSqlResult(v any) *SqlResult {
 		if mm, ok := m.(map[string]any); ok {
 			r.Messages = append(r.Messages, SqlMessage{
 				SQLState: str2(mm, "sqlState"), VendorCode: intVal(mm["vendorCode"]), Message: str2(mm, "message"),
+				SecondLevelText: str2(mm, "secondLevelText"), Kind: str2(mm, "kind"),
 			})
 		}
 	}
 	if r.Kind == "error" {
 		parts := []string{}
-		for _, m := range r.Messages {
+		for i := range r.Messages {
+			m := &r.Messages[i]
+			if m.Kind == "" {
+				m.Kind = sqlMessageKind(m.SQLState)
+			}
 			if m.SQLState != "" {
 				parts = append(parts, fmt.Sprintf("[%s] %s", m.SQLState, m.Message))
 			} else {
@@ -664,6 +725,20 @@ func decodeSqlResult(v any) *SqlResult {
 		r.Error = strings.Join(parts, "\n")
 	}
 	return r
+}
+
+// sqlMessageKind classifies by SQLState class: 00 success, 01 warning, 02
+// no-data (info); everything else is an error. Empty state on an error result
+// is still an error (caller context decides).
+func sqlMessageKind(sqlState string) string {
+	switch {
+	case strings.HasPrefix(sqlState, "01"):
+		return "warning"
+	case sqlState == "02" || strings.HasPrefix(sqlState, "020"):
+		return "info"
+	default:
+		return "error"
+	}
 }
 
 func normalizeNaming(n string) string {

@@ -32,7 +32,7 @@ Command Server or File Server code in `tn5250-desktop`.
 
 ## Requirements
 
-- JDK 17 or later
+- JDK 25 or later
 - Maven 3.9+
 - Go 1.22+
 - Node.js 20+
@@ -173,16 +173,22 @@ cd wails-app/frontend && npm install && npm run build && cd ..
 
 # 3. Build and run the desktop app (Wails needs the dev or production tag;
 #    CGO_LDFLAGS works around a missing UniformTypeIdentifiers link on newer SDKs)
-CGO_LDFLAGS="-framework UniformTypeIdentifiers" go build -tags production -o ibmi-run-sql . && ./ibmi-run-sql
+#    The bridge jar is compiled for JDK 25: the app needs java >= 25 on PATH,
+#    or IBMI_JAVA pointing at one.
+CGO_LDFLAGS="-framework UniformTypeIdentifiers" go build -tags production -o ibmi-runsql . && ./ibmi-runsql
 ```
 
 Or from `wails-app/`, use the Makefile: `make run` (or `make build`).
+
+Bridge Java runtime: the Go process starts the bridge with `java` from PATH;
+set `IBMI_JAVA=/path/to/jdk25/bin/java` to pick a specific JDK (required when
+PATH `java` is older than the JDK the jar was built with).
 
 Or use the Wails CLI for a packaged app / live-reload dev loop:
 
 ```sh
 wails dev          # from wails-app/, frontend hot reload
-wails build        # macOS: build/bin/ibmi-run-sql.app | Windows: .exe | Linux: binary
+wails build        # macOS: build/bin/ibmi-runsql.app | Windows: .exe | Linux: binary
 ```
 
 ### Tests
@@ -221,8 +227,8 @@ The app targets macOS, Windows, and Linux from the same code:
 - Linux prerequisite: WebKitGTK dev package (`libwebkit2gtk-4.1-dev` on
   Debian/Ubuntu, `webkit2gtk4.1-devel` on Fedora) before `wails build`.
 - Saved connections live in the per-user config dir on every OS
-  (`os.UserConfigDir()`): `~/.config/ibmi-run-sql/` on macOS/Linux,
-  `%APPDATA%\ibmi-run-sql\` on Windows.
+  (`os.UserConfigDir()`): `~/Library/Application Support/ibmi-runsql/` on macOS,
+  `~/.config/ibmi-runsql/` on Linux, `%APPDATA%\ibmi-runsql\` on Windows.
 
 The app locates the jar relative to the executable or at
 `../java-bridge/target/ibmi-jdbc-bridge.jar`; override with

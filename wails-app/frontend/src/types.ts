@@ -18,6 +18,8 @@ export interface SqlMessage {
     sqlState: string;
     vendorCode: number;
     message: string;
+    secondLevelText?: string;
+    kind?: "info" | "warning" | "error";
 }
 
 export interface SqlResult {
@@ -76,6 +78,7 @@ export interface ConnectionProfile {
     savePassword?: boolean;
     passwordB64?: string;
     lastUsedAt?: number;
+    pinnedAt?: number;
 }
 
 // Wails v3: the App service is exposed via generated bindings
@@ -92,6 +95,7 @@ export interface AppBinding {
     ListConnectionProfiles(): Promise<ConnectionProfile[]>;
     SaveConnectionProfile(p: ConnectionProfile): Promise<void>;
     DeleteConnectionProfile(name: string): Promise<void>;
+    MoveConnectionProfileToTop(name: string): Promise<void>;
     DetachConnection(connectionId: string, title: string): Promise<void>;
     AttachConnection(connectionId: string): Promise<void>;
     ListDetached(): Promise<string[]>;
