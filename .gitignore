@@ -1,6 +1,6 @@
 # build artifacts
-wails-app/ibmi-run-sql
-wails-app/ibmi-run-sql.exe
+wails-app/ibmi-runsql
+wails-app/ibmi-runsql.exe
 wails-app/build/
 wails-app/frontend/dist/
 wails-app/frontend/node_modules/

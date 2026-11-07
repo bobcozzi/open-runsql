@@ -1,7 +1,7 @@
 {
     "$schema": "https://wails.io/schemas/config.v3.json",
-    "name": "ibmi-run-sql",
-    "outputfilename": "ibmi-run-sql",
+    "name": "ibmi-runsql",
+    "outputfilename": "ibmi-runsql",
     "frontend": {
         "dir": "./frontend",
         "install": "npm install",

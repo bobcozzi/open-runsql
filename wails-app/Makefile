@@ -1,4 +1,4 @@
-APP := ibmi-run-sql
+APP := ibmi-runsql
 JAR := ../java-bridge/target/ibmi-jdbc-bridge.jar
 
 # Wails v2.17 + newer macOS SDKs: UniformTypeIdentifiers (UTType) is not linked

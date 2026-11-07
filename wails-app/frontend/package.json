@@ -1,5 +1,5 @@
 {
-    "name": "ibmi-run-sql-frontend",
+    "name": "ibmi-runsql-frontend",
     "private": true,
     "version": "0.1.0",
     "type": "module",

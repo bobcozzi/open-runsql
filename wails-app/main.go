@@ -34,7 +34,7 @@ func main() {
 	}
 
 	app := application.New(application.Options{
-		Name:        "ibmi-run-sql",
+		Name:        "ibmi-runsql",
 		Description: "IBM i Run SQL Scripts",
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
