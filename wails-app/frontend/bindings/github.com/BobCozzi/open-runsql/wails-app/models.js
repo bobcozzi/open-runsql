@@ -367,6 +367,14 @@ export class ConnectionProfile {
              */
             this["lastUsedAt"] = 0;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * PinnedAt is set by "Move to top": the stable list position override.
+             * @member
+             * @type {number | undefined}
+             */
+            this["pinnedAt"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }

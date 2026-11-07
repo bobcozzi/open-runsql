@@ -17,7 +17,8 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
- * AttachConnection closes the torn-off window for a connection, if any.
+ * AttachConnection closes the torn-off window for a connection, if any, and
+ * asks the main window to re-absorb it as a tab (ignored by detached windows).
  * @param {string} connectionID
  * @returns {$CancellablePromise<void>}
  */
@@ -55,23 +56,16 @@ export function DeleteConnectionProfile(name) {
 }
 
 /**
- * DetachConnection opens a torn-off window for a connection (child process in
- * v2; in-process app.NewWindow() when migrated to Wails v3 via WindowManager).
+ * DetachConnection opens a torn-off window for a connection. Native v3: a new
+ * WebviewWindow on the same process, sharing the bridge JVM and workspace
+ * store. The window's frontend boots into single-connection mode via the
+ * ?connection=<id> query parameter it reads at startup.
  * @param {string} connectionID
  * @param {string} title
  * @returns {$CancellablePromise<void>}
  */
 export function DetachConnection(connectionID, title) {
     return $Call.ByID(2326082926, connectionID, title);
-}
-
-/**
- * DetachedConnectionID returns the connectionId this window is locked to, or
- * "" for the main window. The frontend reads this at boot.
- * @returns {$CancellablePromise<string>}
- */
-export function DetachedConnectionID() {
-    return $Call.ByID(2568726726);
 }
 
 /**
@@ -146,6 +140,15 @@ export function ListWorkspaces() {
 }
 
 /**
+ * MoveConnectionProfileToTop pins a profile at the top of the dropdown.
+ * @param {string} name
+ * @returns {$CancellablePromise<void>}
+ */
+export function MoveConnectionProfileToTop(name) {
+    return $Call.ByID(2667213443, name);
+}
+
+/**
  * Run executes the command-entry text: SQL via JDBC, or CL via CommandCall.
  * @param {$models.RunRequest} req
  * @returns {$CancellablePromise<any>}
@@ -155,7 +158,8 @@ export function Run(req) {
 }
 
 /**
- * SaveConnectionProfile upserts a profile keyed by host+user, MRU-first.
+ * SaveConnectionProfile upserts a profile keyed by host+user, refreshing
+ * LastUsedAt; list ordering is decided by sortProfiles at read time.
  * @param {$models.ConnectionProfile} p
  * @returns {$CancellablePromise<void>}
  */

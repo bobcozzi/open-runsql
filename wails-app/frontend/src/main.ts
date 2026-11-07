@@ -1,4 +1,6 @@
 import "./style.css";
+// @ts-ignore: @wailsio/runtime ships untyped JS
+import { Events } from "@wailsio/runtime";
 import {
     columnHeaderLines,
     columnTooltip,
@@ -37,7 +39,6 @@ const els = {
     btnRunFrom: el<HTMLButtonElement>("btn-run-from"),
     btnCancel: el<HTMLButtonElement>("btn-cancel"),
     btnPrompt: el<HTMLButtonElement>("btn-prompt"),
-    btnClear: el<HTMLButtonElement>("btn-clear"),
     sqlInput: el<HTMLTextAreaElement>("sql-input"),
     workArea: el<HTMLElement>("work-area"),
     workTabs: el<HTMLDivElement>("work-tabs"),
@@ -298,7 +299,6 @@ function restoreActiveTab(): void {
         showPane("results");
     }
     els.messageList.innerHTML = snap?.messagesHtml ?? "";
-    if (snap?.messagesVisible) showPane("messages");
     closeAllPrompterPanes();
     pushWorkspaceState();
 }
@@ -342,6 +342,54 @@ function addTab(): ConnectionTab {
     return tab;
 }
 
+// Re-absorb a connection whose detached window is closing: create a tab bound
+// to the live connectionId and restore its workspace from the shared store.
+async function addDetachedTab(connectionId: string): Promise<void> {
+    if (tabs.some((t) => t.connectionId === connectionId)) return;
+    const app = App();
+    const tab = addTab();
+    tab.connectionId = connectionId;
+    let ws: {
+        label?: string; editorText?: string; statusText?: string; messagesHtml?: string;
+        columns?: ColumnInfo[]; rows?: unknown[][]; cursorId?: string; more?: boolean; showingResults?: boolean;
+    } = {};
+    try {
+        ws = (await app.GetWorkspace(connectionId)) as typeof ws;
+    } catch {
+        // workspace gone: keep the bare tab
+    }
+    tab.label = ws.label ?? "Connection";
+    const showingResults = !!ws.showingResults && !!ws.columns;
+    tab.snapshot = {
+        editorText: ws.editorText ?? "",
+        columns: ws.columns ? [...ws.columns] : [],
+        rows: (ws.rows ?? []).map((r) => [...r]),
+        cursorId: ws.cursorId ?? null,
+        more: !!ws.more,
+        statusText: ws.statusText ?? "",
+        messagesHtml: ws.messagesHtml ?? "",
+        messagesVisible: !!ws.messagesHtml,
+        showingResults,
+    };
+    restoreActiveTab();
+    renderTabs();
+    syncConnectionUi();
+}
+
+// --- Detached window mode: ?connection=<id> locks this window to that
+// connection (set by App.DetachConnection's window URL). Declared early so
+// module-level guards below can use it (const is in the temporal dead zone
+// until this point).
+const detachedConnId = new URLSearchParams(window.location.search).get("connection") || "";
+
+// Only the main window hosts tabs; detached windows must ignore reattach events.
+if (!detachedConnId) {
+    Events.On("workspace:reattach", (ev: { data?: { connectionId?: string } }) => {
+        const id = ev?.data?.connectionId;
+        if (id) void addDetachedTab(id);
+    });
+}
+
 function switchTab(key: string): void {
     if (activeTabKey === key) return;
     snapshotActiveTab();
@@ -375,6 +423,10 @@ async function closeTab(key: string): Promise<void> {
     syncConnectionUi();
 }
 
+// True after the first connect attempt in this window: keeps the work area
+// visible for failure feedback instead of re-hiding it when still disconnected.
+let connectAttempted = false;
+
 function syncConnectionUi(): void {
     const tab = activeTab();
     const connected = !!tab?.connectionId;
@@ -388,6 +440,13 @@ function syncConnectionUi(): void {
     els.btnPrompt.disabled = !connected;
     els.btnCancel.disabled = true;
     els.connectPanel.hidden = connected;
+    // Results/Messages area + run buttons are meaningless without a connection;
+    // editor stays usable. After a connect attempt the area stays up so the
+    // failure is visible on the Messages pane.
+    const showWork = connected || connectAttempted;
+    els.workArea.hidden = !showWork;
+    el<HTMLDivElement>("splitter").hidden = !showWork;
+    el<HTMLSpanElement>("run-controls").hidden = !connected;
 }
 
 // Display settings — future per-connection/global config; heading default is ON
@@ -414,7 +473,7 @@ function setConnected(info: ConnectResponse): void {
     els.sqlInput.focus();
     // ACS-style connection log line.
     const job = info.serverJob ? ` - ${info.serverJob}` : "";
-    appendLogLine(`[ ${nowStamp()} ]  Connected`, "msg-action");
+    appendLogLine(`[ ${nowStamp()} ]  ${info.user}@${info.host} Connected`, "msg-action");
     appendLogLine(`Connected to relational database ${info.databaseProduct} on ${info.host} as ${info.user}${job} using JDBC driver '${info.driverName} ${info.driverVersion}'`, "msg-info", true);
 }
 
@@ -428,6 +487,13 @@ function setDisconnected(): void {
     }
     state.cursorId = null;
     state.more = false;
+    // Clear the visible panes (the snapshot taken by the caller keeps the last
+    // result set for the tab); the work area hides via syncConnectionUi.
+    els.resultHead.innerHTML = "";
+    els.resultBody.innerHTML = "";
+    els.statusText.textContent = "";
+    els.btnLoadMore.hidden = true;
+    els.btnLoadAll.hidden = true;
     renderTabs();
     syncConnectionUi();
     closeAllPrompterPanes();
@@ -477,21 +543,35 @@ function showMessages(items: DisplayMessage[] | undefined, failure?: string): vo
     if (!hasContent) return;
 
     messageSeq += 1;
-    const header = document.createElement("li");
-    header.className = "msg msg-batch-header";
-    header.textContent = `Messages`;
-    els.messageList.appendChild(header);
-
     let hasError = false;
+    let coveredFailure = false;
     for (const m of items ?? []) {
         const li = document.createElement("li");
         li.className = `msg msg-${m.kind ?? "info"}`;
         if (m.kind === "error") hasError = true;
-        const idPart = m.id || m.sqlState || "";
+        // ACS-style: SQL State / SQL Code labeled for non-JDBC developers —
+        // CL messages keep id/type/severity. SQL errors put the id part on its
+        // own line (a real <br>, so no reliance on whitespace CSS).
+        const idPart = m.id
+            ? m.id
+            : m.sqlState
+                ? `SQL State: ${m.sqlState}${m.vendorCode != null && m.vendorCode !== 0 ? `, SQL Code: ${m.vendorCode}` : ""}`
+                : "";
         const textPart = m.text || m.message || "";
         const sevPart = m.severity != null && m.typeName ? ` [${m.typeName} ${m.severity}]` : "";
-        li.textContent = (idPart ? `${idPart}: ${textPart}` : textPart) + sevPart;
+        if (!idPart) {
+            li.textContent = textPart + sevPart;
+        } else if (m.id) {
+            li.textContent = `${idPart}: ${textPart}` + sevPart;
+        } else {
+            li.appendChild(document.createTextNode(idPart));
+            li.appendChild(document.createElement("br"));
+            li.appendChild(document.createTextNode(textPart + sevPart));
+        }
         li.classList.add("msg-indent");
+        // The Go-side error string repeats the SQL message in [sqlState] [msgId]
+        // form; if a messages entry already carries that text, drop the duplicate.
+        if (failure && textPart && failure.includes(textPart)) coveredFailure = true;
         const tip: string[] = [];
         if (m.typeName) tip.push(`Type: ${m.typeName}  Severity: ${m.severity}`);
         if (m.secondLevelText) tip.push(m.secondLevelText);
@@ -504,7 +584,7 @@ function showMessages(items: DisplayMessage[] | undefined, failure?: string): vo
         }
         els.messageList.appendChild(li);
     }
-    if (failure) {
+    if (failure && !coveredFailure) {
         const li = document.createElement("li");
         li.className = "msg msg-error msg-indent";
         li.textContent = failure;
@@ -627,6 +707,17 @@ function showSqlResult(result: SqlResult): void {
     if (result.kind === "error") {
         showMessages(result.messages, result.error);
         updateStatus("error", result, 0);
+        // Results pane shows the failure too — no hidden trip to Messages.
+        els.resultHead.innerHTML = "";
+        els.resultBody.innerHTML = "";
+        const banner = document.createElement("div");
+        banner.className = "result-error";
+        const first = result.messages?.[0];
+        banner.textContent = first
+            ? `SQL State: ${first.sqlState}${first.vendorCode ? `, SQL Code: ${first.vendorCode}` : ""}: ${first.message}`
+            : result.error ?? "Statement failed";
+        els.resultBody.appendChild(banner);
+        if (!activePane.startsWith("prompter-")) showPane("results");
         return;
     }
     showMessages(result.messages);
@@ -668,6 +759,8 @@ async function doConnect(): Promise<void> {
     if (!app) return;
     els.connectError.hidden = true;
     els.btnConnect.disabled = true;
+    connectAttempted = true;
+    syncConnectionUi(); // reveal work area for the attempt
     try {
         const info = await app.Connect({
             host: el<HTMLInputElement>("in-host").value,
@@ -685,6 +778,10 @@ async function doConnect(): Promise<void> {
         els.btnConnect.disabled = false;
         els.connectError.textContent = String((err as Error)?.message ?? err);
         els.connectError.hidden = false;
+        // Connect failures must be visible: open Messages with the error.
+        appendLogLine(`[ ${nowStamp()} ]  Connect`, "msg-action");
+        appendLogLine(`Connection failed: ${String((err as Error)?.message ?? err)}`, "msg-error", true);
+        showPane("messages");
     }
 }
 
@@ -773,7 +870,8 @@ async function doDisconnect(): Promise<void> {
         // ignore
     }
     // Multi-tab: close this tab and fall back to the prior one. Single tab:
-    // keep the tab and reset it to the not-connected state.
+    // snapshot the workspace first (result set survives the disconnect), then
+    // reset the tab to the not-connected state.
     if (tabs.length > 1) {
         const idx = tabs.findIndex((t) => t.key === tab.key);
         tab.connectionId = null; // already closed on the host
@@ -784,6 +882,7 @@ async function doDisconnect(): Promise<void> {
         syncConnectionUi();
         return;
     }
+    snapshotActiveTab();
     setDisconnected();
 }
 
@@ -1052,14 +1151,6 @@ els.btnRunFrom.addEventListener("click", () => void doRunFromSelected());
 els.btnCancel.addEventListener("click", () => void doCancel());
 els.btnPrompt.addEventListener("click", () => void doPrompt());
 el<HTMLButtonElement>("btn-new-conn").addEventListener("click", () => addTab());
-els.btnClear.addEventListener("click", () => {
-    els.sqlInput.value = "";
-    els.sqlInput.focus();
-});
-el<HTMLButtonElement>("btn-clear-messages").addEventListener("click", () => {
-    clearMessages();
-    showPane("messages");
-});
 els.btnLoadMore.addEventListener("click", () => void doFetch(false));
 els.btnLoadAll.addEventListener("click", () => void doFetch(true));
 
@@ -1139,15 +1230,19 @@ async function forgetProfileByName(name: string): Promise<void> {
 async function bumpProfile(name: string): Promise<void> {
     const app = App();
     if (!app) return;
-    const p = profiles.find((x) => x.name === name);
-    if (!p) return;
     try {
-        await app.SaveConnectionProfile(p); // re-save bumps lastUsedAt -> top
+        await app.MoveConnectionProfileToTop(name); // pins to the top
         await loadProfiles();
     } catch {
         // best effort
     }
 }
+
+// Word-font-dropdown style: with more than 5 saved profiles, the 5 most
+// recently used appear on top above a separator; at 5 or fewer the list is
+// stable (Go sorts pinned-first then creation/FILO order) so connections stop
+// being moving targets.
+const RECENT_SECTION_SIZE = 5;
 
 function toggleSavedHosts(): void {
     const popup = el<HTMLDivElement>("saved-hosts-popup");
@@ -1156,25 +1251,37 @@ function toggleSavedHosts(): void {
         return;
     }
     popup.innerHTML = "";
+    const addItem = (p: ConnectionProfile) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "combo-item";
+        item.dataset.profileName = p.name;
+        item.textContent = `${p.host} — ${p.user}${p.tls ? " (TLS)" : ""}${p.defaultSchema ? ` [${p.defaultSchema}]` : ""}`;
+        item.title = "Click to fill form; right-click for options";
+        item.addEventListener("click", () => {
+            fillFormFromProfile(p);
+            popup.hidden = true;
+        });
+        popup.appendChild(item);
+    };
     if (profiles.length === 0) {
         const empty = document.createElement("div");
         empty.className = "combo-item combo-empty";
         empty.textContent = "No saved connections yet — connect once and it will appear here.";
         popup.appendChild(empty);
     } else {
-        for (const p of profiles) {
-            const item = document.createElement("button");
-            item.type = "button";
-            item.className = "combo-item";
-            item.dataset.profileName = p.name;
-            item.textContent = `${p.host} — ${p.user}${p.tls ? " (TLS)" : ""}${p.defaultSchema ? ` [${p.defaultSchema}]` : ""}`;
-            item.title = "Click to fill form; right-click for options";
-            item.addEventListener("click", () => {
-                fillFormFromProfile(p);
-                popup.hidden = true;
-            });
-            popup.appendChild(item);
-        }
+        const pinnedCount = profiles.filter((p) => (p.pinnedAt ?? 0) > 0).length;
+        const recentCount = profiles.length > RECENT_SECTION_SIZE
+            ? Math.max(pinnedCount, RECENT_SECTION_SIZE)
+            : profiles.length;
+        profiles.forEach((p, i) => {
+            if (i === recentCount) {
+                const sep = document.createElement("div");
+                sep.className = "combo-separator";
+                popup.appendChild(sep);
+            }
+            addItem(p);
+        });
     }
     popup.hidden = false;
 }
@@ -1207,10 +1314,6 @@ document.addEventListener("click", (ev) => {
 });
 
 void loadProfiles();
-
-// --- Detached window mode: ?connection=<id> locks this window to that
-// connection (set by App.DetachConnection's window URL). ---
-const detachedConnId = new URLSearchParams(window.location.search).get("connection") || "";
 
 // --- Editor/results splitter (ACS-style vertical resize) ---
 (() => {
@@ -1261,43 +1364,62 @@ if (detachedConnId) {
     };
     tabs.push(tab);
     activeTabKey = tab.key;
-    els.btnRun.disabled = false;
-    els.btnRunAll.disabled = false;
-    els.btnRunFrom.disabled = false;
-    els.btnPrompt.disabled = false;
+    // Set all buttons consistently from the tab's connected state (Connect
+    // disabled, Disconnect enabled, Run/Prompt enabled).
+    syncConnectionUi();
     els.badge.textContent = "Detached window";
     els.badge.className = "badge connected";
+    const btnReattach = el<HTMLButtonElement>("btn-reattach");
+    btnReattach.hidden = false;
+    btnReattach.addEventListener("click", () => {
+        void App().AttachConnection(detachedConnId);
+    });
+
+    interface WorkspaceMirror {
+        label?: string; editorText?: string; statusText?: string; messagesHtml?: string;
+        columns?: ColumnInfo[]; rows?: unknown[][]; cursorId?: string; more?: boolean; showingResults?: boolean;
+    }
+
+    // Apply a workspace snapshot pushed from the Go store. Editor text is only
+    // overwritten when it differs, so our own keystrokes (echoed back via
+    // UpdateEditorText) never reset the caret.
+    const applyWorkspace = (ws: WorkspaceMirror): void => {
+        if (ws.label) {
+            tab.label = ws.label;
+            els.badge.textContent = ws.label + " (detached)";
+        }
+        if (typeof ws.editorText === "string" && ws.editorText !== els.sqlInput.value) {
+            els.sqlInput.value = ws.editorText;
+        }
+        if (typeof ws.statusText === "string" && ws.statusText !== els.statusText.textContent) {
+            els.statusText.textContent = ws.statusText;
+        }
+        if (typeof ws.messagesHtml === "string" && ws.messagesHtml !== els.messageList.innerHTML) {
+            els.messageList.innerHTML = ws.messagesHtml;
+        }
+        if (ws.showingResults && ws.columns) {
+            state.columns = [...ws.columns];
+            state.rows = (ws.rows ?? []).map((r) => [...r]);
+            state.cursorId = ws.cursorId ?? null;
+            state.more = !!ws.more;
+            renderTable();
+            els.btnLoadMore.hidden = !state.more;
+            els.btnLoadAll.hidden = !state.more;
+            showPane("results");
+        }
+    };
 
     void (async () => {
         const app = App();
         try {
-            const ws = (await app.GetWorkspace(detachedConnId)) as {
-                label?: string; editorText?: string; statusText?: string; messagesHtml?: string;
-                columns?: ColumnInfo[]; rows?: unknown[][]; cursorId?: string; more?: boolean; showingResults?: boolean;
-            };
-            if (ws.label) {
-                tab.label = ws.label;
-                els.badge.textContent = ws.label + " (detached)";
-            }
-            if (ws.editorText) els.sqlInput.value = ws.editorText;
-            if (ws.statusText) els.statusText.textContent = ws.statusText;
-            if (ws.messagesHtml) {
-                els.messageList.innerHTML = ws.messagesHtml;
-                showPane("messages");
-            }
-            if (ws.showingResults && ws.columns) {
-                state.columns = [...ws.columns];
-                state.rows = (ws.rows ?? []).map((r) => [...r]);
-                state.cursorId = ws.cursorId ?? null;
-                state.more = !!ws.more;
-                renderTable();
-                els.btnLoadMore.hidden = !state.more;
-                els.btnLoadAll.hidden = !state.more;
-                showPane("results");
-            }
+            applyWorkspace((await app.GetWorkspace(detachedConnId)) as WorkspaceMirror);
         } catch {
             // workspace empty or not found: window starts blank on a live connection
         }
+        // Live updates from either window after boot.
+        Events.On(`workspace:changed:${detachedConnId}`, (ev: { data?: WorkspaceMirror }) => {
+            if (ev?.data) applyWorkspace(ev.data);
+        });
     })();
 } else {
     addTab();
