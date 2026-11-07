@@ -299,8 +299,19 @@ function restoreActiveTab(): void {
     }
     els.messageList.innerHTML = snap?.messagesHtml ?? "";
     if (snap?.messagesVisible) showPane("messages");
-    // Prompter panes are per-tab-transient; closed on switch.
     closeAllPrompterPanes();
+    pushWorkspaceState();
+}
+
+// Push the visible workspace state to the Go store (single source of truth for
+// torn-off windows). Called after any user-visible change.
+function pushWorkspaceState(): void {
+    const tab = activeTab();
+    if (!tab?.connectionId) return;
+    const app = App();
+    void app.UpdateEditorText(tab.connectionId, els.sqlInput.value);
+    void app.UpdateMessagesHTML(tab.connectionId, els.messageList.innerHTML);
+    void app.UpdateStatusText(tab.connectionId, els.statusText.textContent ?? "");
 }
 
 function closeAllPrompterPanes(): void {
@@ -1062,6 +1073,7 @@ els.sqlInput.addEventListener("keydown", (ev: KeyboardEvent) => {
         void doPrompt();
     }
 });
+els.sqlInput.addEventListener("input", () => pushWorkspaceState());
 
 el<HTMLInputElement>("in-password").addEventListener("keydown", (ev: KeyboardEvent) => {
     if (ev.key === "Enter") void doConnect();
@@ -1236,6 +1248,8 @@ const detachedConnId = new URLSearchParams(window.location.search).get("connecti
 
 if (detachedConnId) {
     // Torn-off window: single connection, no tab strip, no connect form.
+    // Boot from the Go workspace store (shared with the main window), then
+    // subscribe to live updates via workspace:changed.
     document.getElementById("conn-tabs")!.style.display = "none";
     els.connectPanel.hidden = true;
     const tab: ConnectionTab = {
@@ -1253,6 +1267,38 @@ if (detachedConnId) {
     els.btnPrompt.disabled = false;
     els.badge.textContent = "Detached window";
     els.badge.className = "badge connected";
+
+    void (async () => {
+        const app = App();
+        try {
+            const ws = (await app.GetWorkspace(detachedConnId)) as {
+                label?: string; editorText?: string; statusText?: string; messagesHtml?: string;
+                columns?: ColumnInfo[]; rows?: unknown[][]; cursorId?: string; more?: boolean; showingResults?: boolean;
+            };
+            if (ws.label) {
+                tab.label = ws.label;
+                els.badge.textContent = ws.label + " (detached)";
+            }
+            if (ws.editorText) els.sqlInput.value = ws.editorText;
+            if (ws.statusText) els.statusText.textContent = ws.statusText;
+            if (ws.messagesHtml) {
+                els.messageList.innerHTML = ws.messagesHtml;
+                showPane("messages");
+            }
+            if (ws.showingResults && ws.columns) {
+                state.columns = [...ws.columns];
+                state.rows = (ws.rows ?? []).map((r) => [...r]);
+                state.cursorId = ws.cursorId ?? null;
+                state.more = !!ws.more;
+                renderTable();
+                els.btnLoadMore.hidden = !state.more;
+                els.btnLoadAll.hidden = !state.more;
+                showPane("results");
+            }
+        } catch {
+            // workspace empty or not found: window starts blank on a live connection
+        }
+    })();
 } else {
     addTab();
 }
