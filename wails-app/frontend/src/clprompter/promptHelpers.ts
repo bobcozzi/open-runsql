@@ -1,0 +1,523 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2026 R. Cozzi, Jr.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+// Split a string into top-level parenthesized groups, preserving all content inside each group
+// Example: INCREL((*IF IMDEL *EQ 'A') (*OR IMDEL *EQ ' ')) => ["(*IF IMDEL *EQ 'A')", "(*OR IMDEL *EQ ' ')"]
+export function splitTopLevelParenGroups(str: string): string[] {
+    const groups: string[] = [];
+    let current = '';
+    let depth = 0;
+    let inSingle = false, inDouble = false;
+    for (let i = 0; i < str.length; i++) {
+        const c = str[i];
+        if (c === "'" && !inDouble) inSingle = !inSingle;
+        else if (c === '"' && !inSingle) inDouble = !inDouble;
+        if (!inSingle && !inDouble) {
+            if (c === '(') {
+                if (depth === 0 && current.trim().length > 0) {
+                    groups.push(current.trim());
+                    current = '';
+                }
+                depth++;
+            } else if (c === ')') {
+                depth--;
+            }
+        }
+        current += c;
+        if (depth === 0 && (c === ')' || (i === str.length - 1 && current.trim().length > 0))) {
+            groups.push(current.trim());
+            current = '';
+        }
+    }
+    return groups.filter(g => g.length > 0);
+}
+
+// ✅ Valid IBM i CL parameter data types
+export const CL_DATA_TYPES: string[] = [
+    'DEC', 'LGL', 'CHAR', 'INT2', 'INT4', 'UINT2', 'UINT4', 'NAME', 'GENERIC', 'VARNAME',
+    'DATE', 'TIME', 'CMD', 'X', 'ZEROELEM', 'NULL', 'CMDSTR', 'PNAME', 'SNAME', 'CNAME'
+];
+
+// ✅ Container/structure Types (not actual data types)
+export const CL_CONTAINER_TYPES: string[] = [
+    'ELEM', 'QUAL'
+];
+
+// ✅ Check if a type is a valid data type
+export function isValidDataType(type: string | null | undefined): boolean {
+    return CL_DATA_TYPES.includes((type || '').toUpperCase());
+}
+
+// ✅ Check if a type is a container type
+export function isContainerType(type: string | null | undefined): boolean {
+    return CL_CONTAINER_TYPES.includes((type || '').toUpperCase());
+}
+
+// ✅ Check if a type needs special handling
+export function getTypeCategory(type: string | null | undefined): 'DATA_TYPE' | 'CONTAINER' | 'UNKNOWN' {
+    const upperType = (type || '').toUpperCase();
+    if (CL_DATA_TYPES.includes(upperType)) {
+        return 'DATA_TYPE';
+    } else if (CL_CONTAINER_TYPES.includes(upperType)) {
+        return 'CONTAINER';
+    } else {
+        return 'UNKNOWN';
+    }
+}
+
+function getDirectChildElementsByTagName(parent: Element, tagName: string): Element[] {
+    const upperTagName = tagName.toUpperCase();
+    const out: Element[] = [];
+    const children = parent.childNodes || [];
+
+    for (let i = 0; i < children.length; i++) {
+        const node = children[i] as Node;
+        if (node.nodeType !== 1) continue;
+        const el = node as unknown as Element;
+        if ((el.tagName || '').toUpperCase() === upperTagName) {
+            out.push(el);
+        }
+    }
+
+    return out;
+}
+
+// Detect non-promptable internal shell PARM entries that wrap constant ELEM values.
+// This is attribute/structure based and does not depend on a specific Kwd name.
+export function isInternalConstantElemShellParm(parm: Element | null): boolean {
+    if (!parm) return false;
+
+    const type = String(parm.getAttribute('Type') || '').toUpperCase();
+    if (type !== 'ELEM') return false;
+
+    // Promptable parms generally provide PosNbr and/or Prompt.
+    const hasPosNbr = parm.hasAttribute('PosNbr');
+    const hasPrompt = String(parm.getAttribute('Prompt') || '').trim().length > 0;
+    if (hasPosNbr || hasPrompt) return false;
+
+    const elemParts = getDirectChildElementsByTagName(parm, 'Elem');
+    if (elemParts.length === 0) return false;
+
+    return elemParts.every((elem) => {
+        const constant = String(elem.getAttribute('Constant') || '').trim();
+        if (!constant) return false;
+
+        const hasNestedElems = getDirectChildElementsByTagName(elem, 'Elem').length > 0;
+        const hasNestedQuals = getDirectChildElementsByTagName(elem, 'Qual').length > 0;
+        if (hasNestedElems || hasNestedQuals) return false;
+
+        const hasElemPrompt = String(elem.getAttribute('Prompt') || '').trim().length > 0;
+        if (hasElemPrompt) return false;
+
+        const hasInputHints =
+            elem.hasAttribute('DspInput') ||
+            elem.hasAttribute('Choice') ||
+            elem.hasAttribute('RangeMinVal') ||
+            elem.hasAttribute('RangeMaxVal');
+
+        return !hasInputHints;
+    });
+}
+
+// CL variable name pattern: &NAME or &NAME_QUALIFIER
+// Max: 22 chars total (& + up to 21)
+export const CL_VARIABLE_PATTERN = /^&[A-Z][A-Z0-9_]{0,21}$/i;
+
+// Shared validator for NAME-like values used by both formatter and prompter.
+// Supports IBM i name subtypes: NAME, SNAME, CNAME, and PNAME.
+export function isValidNameValue(val: string, maxLen?: number, nameType?: string): boolean {
+    const trimmed = (val || '').trim();
+    if (!trimmed) {
+        return false;
+    }
+
+    if (trimmed.startsWith('&')) {
+        return CL_VARIABLE_PATTERN.test(trimmed);
+    }
+
+    const effectiveMax = Number.isFinite(maxLen as number) && (maxLen as number) > 0
+        ? Math.max(1, maxLen as number)
+        : 10;
+
+    const normalizedType = String(nameType || 'NAME').toUpperCase().replace('*', '');
+    const isSName = normalizedType === 'SNAME';
+    const isCName = normalizedType === 'CNAME';
+    const isPName = normalizedType === 'PNAME';
+
+    // NAME-like values may be parenthesized in some command help docs.
+    // Treat a single outer (...) pair as syntactic wrapping.
+    const candidate = (
+        trimmed.length >= 2 &&
+        trimmed.startsWith('(') &&
+        trimmed.endsWith(')')
+    ) ? trimmed.slice(1, -1).trim() : trimmed;
+
+    if (!candidate) {
+        return false;
+    }
+
+    // IBM i command values commonly use qualified names such as LIB/OBJ or LIB/FILE(MBR).
+    // Validate each path segment independently rather than rejecting the entire string.
+    if (candidate.includes('/')) {
+        const qualifiedParts = splitCLQual(candidate).filter(part => part.length > 0);
+        if (qualifiedParts.length > 1) {
+            return qualifiedParts.every(part => isValidNameValue(part, maxLen, nameType));
+        }
+    }
+
+    if (isPName) {
+        const isAposQuoted = candidate.length >= 2 && candidate.startsWith("'") && candidate.endsWith("'");
+        const body = isAposQuoted ? candidate.slice(1, -1) : candidate;
+        if (!body) {
+            return false;
+        }
+
+        const pnameMax = Number.isFinite(maxLen as number) && (maxLen as number) > 0
+            ? Math.max(1, maxLen as number)
+            : 5000;
+
+        if (body.length > pnameMax) {
+            return false;
+        }
+
+        if (isAposQuoted) {
+            // Keep apostrophe handling strict and simple in the webview validator.
+            return !body.includes("'");
+        }
+
+        // Unquoted PNAME: conservative allowed set for path-like tokens.
+        return /^[A-Z0-9_$@#./*\-]+$/i.test(body);
+    }
+
+    let unquotedCharClass = 'A-Z0-9$#@_.';
+    if (isSName) {
+        unquotedCharClass = 'A-Z0-9$#@_';
+    } else if (isCName) {
+        unquotedCharClass = 'A-Z0-9$#@';
+    }
+
+    const plainNamePattern = new RegExp(`^[A-Z$#@][${unquotedCharClass}]{0,${effectiveMax - 1}}$`, 'i');
+
+    // Quoted *NAME form: must use double quotes.
+    if (candidate.length >= 2 && candidate.startsWith('"') && candidate.endsWith('"')) {
+        const inner = candidate.slice(1, -1);
+        if (inner.length < 1) {
+            return false;
+        }
+
+        // IBM nuance: if the quoted value is a valid unquoted basic name,
+        // quotes are effectively removed ("ABC" == ABC), so normal max applies.
+        if (plainNamePattern.test(inner)) {
+            return inner.length <= effectiveMax;
+        }
+
+        // For true quoted/graphic names, IBM supplied commands allow up to 8 chars.
+        // For custom commands (Len > 10), quoted maximum is typically 2 less.
+        const quotedMax = effectiveMax > 10 ? Math.max(1, effectiveMax - 2) : 8;
+        if (inner.length > quotedMax) {
+            return false;
+        }
+
+        // IBM docs: quoted names can contain graphic characters but exclude
+        // blanks/comma/asterisk/question/single-quote/double-quote/slash.
+        // In JS we approximate control-code checks with Unicode control chars;
+        // this keeps IBM examples such as "AA%abc" valid.
+        // SNAME/CNAME add subtype restrictions for period/underscore.
+        for (let i = 0; i < inner.length; i++) {
+            const ch = inner[i];
+            const code = inner.charCodeAt(i);
+            if (
+                ch === ' ' ||
+                ch === ',' ||
+                ch === '*' ||
+                ch === '?' ||
+                ch === "'" ||
+                ch === '"' ||
+                ch === '/' ||
+                (isSName && ch === '.') ||
+                (isCName && (ch === '.' || ch === '_')) ||
+                code <= 0x1f ||
+                code === 0x7f ||
+                code === 0xff
+            ) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Unquoted basic name form.
+    return plainNamePattern.test(candidate);
+}
+
+export function splitUnquotedSlash(str: string): string[] {
+    const result: string[] = [];
+    let current = '';
+    let inSingle = false, inDouble = false;
+    for (let i = 0; i < str.length; i++) {
+        const c = str[i];
+        if (c === "'" && !inDouble) inSingle = !inSingle;
+        else if (c === '"' && !inSingle) inDouble = !inDouble;
+        else if (c === '/' && !inSingle && !inDouble) {
+            result.push(current);
+            current = '';
+            continue;
+        }
+        current += c;
+    }
+    result.push(current);
+    return result;
+}
+
+export function splitCLQual(val: string): string[] {
+    const parts: string[] = [];
+    let current = '';
+    let inSingle = false, inDouble = false, parenDepth = 0;
+    for (let i = 0; i < val.length; i++) {
+        const c = val[i];
+        if (c === "'" && !inDouble) {
+            inSingle = !inSingle;
+        } else if (c === '"' && !inSingle) {
+            inDouble = !inDouble;
+        } else if (!inSingle && !inDouble) {
+            if (c === '(') {
+                parenDepth++;
+            } else if (c === ')') {
+                if (parenDepth > 0) parenDepth--;
+            }
+        }
+        if (c === '/' && !inSingle && !inDouble && parenDepth === 0) {
+            parts.push(current.trim());
+            current = '';
+        } else {
+            current += c;
+        }
+    }
+    if (current.length > 0) {
+        parts.push(current.trim());
+    }
+    return parts;
+}
+
+// Default field lengths for IBM i CL data types (when no Len= attribute is present)
+export const CL_TYPE_DEFAULT_LENGTHS: Record<string, number> = {
+    'DEC': 15,
+    'LGL': 80,  // Logical expressions can be complex, default to 80
+    'CHAR': 32,
+    'NAME': 10,
+    'SNAME': 10,
+    'CNAME': 10,
+    'PNAME': 32,
+    'GENERIC': 10,
+    'HEX': 1,
+    'X': 15,
+    'VARNAME': 11,
+    'CMD': 256,
+    'CMDSTR': 256
+};
+
+// Get the default field length for a CL type (if no Len= attribute)
+export function getDefaultLengthForType(type: string | null | undefined): number {
+    if (!type) return 10;
+    const upper = type.replace('*', '').toUpperCase();
+    return CL_TYPE_DEFAULT_LENGTHS[upper] || 10;
+}
+
+// ✅ Get CSS width class based on effective length
+export function getLengthClass(effectiveLen: number): string {
+    if (effectiveLen <= 6) return 'input-xs';
+    if (effectiveLen <= 12) return 'input-sm';
+    if (effectiveLen <= 25) return 'input-md';
+    if (effectiveLen <= 50) return 'input-lg';
+    if (effectiveLen <= 80) return 'input-xl';
+    return 'input-full';
+}
+
+// --- CL Prompter formatting settings ---
+// These should be settable in the extension's config UI and used in formatCL.ts
+export function getCLPrompterFormatSettings(): {
+    formatLabelPosition: number;
+    formatCmdPosition: number;
+    formatKwdPosition: number;
+    formatContinuePosition: number;
+    formatRightMargin: number;
+} {
+    // Default settings; extension can send updates via webview messages
+    return {
+        formatLabelPosition: 2,
+        formatCmdPosition: 14,
+        formatKwdPosition: 25,
+        formatContinuePosition: 27,
+        formatRightMargin: 72
+    };
+}
+
+// Flatten parameter value (for QUAL nodes)
+export function flattenParmValue(val: any): string[] {
+    if (typeof val === "string") {
+        return [val];
+    }
+    if (Array.isArray(val)) {
+        if (val.length > 0 && Array.isArray(val[0])) {
+            return val.map(sub =>
+                Array.isArray(sub) ? sub.join("/") : sub
+            );
+        }
+        return val;
+    }
+    return [];
+}
+
+// Parse a space-separated string, respecting quoted substrings
+export function parseSpaceSeparatedValues(str: string): string[] {
+    const values: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    let quoteChar = '';
+    for (let i = 0; i < str.length; i++) {
+        const char = str[i];
+        if (!inQuotes && (char === "'" || char === '"')) {
+            inQuotes = true;
+            quoteChar = char;
+            current += char;
+        } else if (inQuotes && char === quoteChar) {
+            inQuotes = false;
+            current += char;
+        } else if (!inQuotes && /\s/.test(char)) {
+            if (current.trim()) {
+                values.push(current.trim());
+                current = '';
+            }
+        } else {
+            current += char;
+        }
+    }
+    if (current.trim()) {
+        values.push(current.trim());
+    }
+    return values;
+}
+
+/**
+ * Determine whether a parameter should be treated as specified when the default
+ * is defined on a child field (e.g. QUAL0) rather than the parent <Parm>.
+ */
+export function isSpecifiedFromChildDefault(
+    rawValue: string,
+    childDefault: string | undefined,
+    wasInOriginalCommand: boolean
+): boolean {
+    if (wasInOriginalCommand) {
+        return true;
+    }
+
+    const val = (rawValue || '').trim();
+    const dft = (childDefault || '').trim();
+
+    if (!val) {
+        return false;
+    }
+
+    if (dft && val === dft) {
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * Parse ELEM values, respecting parentheses and quotes.
+ * For simple values like "0 0 *SECLVL", splits on spaces.
+ * For nested values like "(*BEFORE 'text') (*AFTER 'text')", preserves groups.
+ *
+ * Uses independent SQ/DQ boolean flags so that a single quote inside a
+ * double-quoted string (and vice versa) does not toggle the opposing quote
+ * state — consistent with IBM i CL quoting rules.
+ */
+export function parseElemValues(str: string): string[] {
+    const values: string[] = [];
+    let current = '';
+    let parenDepth = 0;
+    let inSQ = false;  // inside single-quoted string
+    let inDQ = false;  // inside double-quoted string
+
+    for (let i = 0; i < str.length; i++) {
+        const char = str[i];
+
+        // Track quote state independently for each quote type.
+        // A single quote inside a double-quoted string (and vice versa) does NOT toggle state.
+        if (char === "'" && !inDQ) { inSQ = !inSQ; current += char; continue; }
+        if (char === '"' && !inSQ) { inDQ = !inDQ; current += char; continue; }
+
+        const inQuotes = inSQ || inDQ;
+
+        // Track parentheses depth (only when not in quotes)
+        if (!inQuotes && char === '(') {
+            parenDepth++;
+            current += char;
+            continue;
+        }
+        if (!inQuotes && char === ')') {
+            parenDepth--;
+            current += char;
+            continue;
+        }
+        // Split on whitespace only when not in quotes and at top-level depth
+        if (!inQuotes && parenDepth === 0 && /\s/.test(char)) {
+            if (current.trim()) {
+                values.push(current.trim());
+                current = '';
+            }
+            continue;
+        }
+        current += char;
+    }
+
+    if (current.trim()) {
+        values.push(current.trim());
+    }
+
+    return values;
+}
+
+/**
+ * Parse the content inside parentheses for nested ELEM groups.
+ * E.g., "(*BEFORE 'text')" -> ["*BEFORE", "'text'"]
+ * Strips outer parens and splits on spaces respecting quotes.
+ */
+export function parseParenthesizedContent(str: string): string[] {
+    let trimmed = str.trim();
+
+    // Strip outer parentheses if present
+    if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
+        trimmed = trimmed.substring(1, trimmed.length - 1).trim();
+    }
+
+    // Now split on spaces, respecting quotes
+    return parseElemValues(trimmed);
+}
+
+// parseCLCmd has been removed — it was dead code (exported but never called).
+// All CL command parsing is handled by parseCLParms() in parseCL.ts which correctly
+// handles QUAL, ELEM, nested structures, multi-instance parameters, and quoted values.

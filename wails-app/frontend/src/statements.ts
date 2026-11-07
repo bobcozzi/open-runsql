@@ -1,0 +1,102 @@
+// SQL/CL statement splitting for multi-statement execution.
+// Splits on top-level semicolons, respecting quotes and -- / block comments.
+// Ported from cozzi-cl-prompter sqlSyntaxChecker.ts scanning rules.
+
+export interface StatementSpan {
+    text: string;
+    start: number; // offset in source
+    end: number;
+}
+
+export function splitStatements(source: string): StatementSpan[] {
+    const spans: StatementSpan[] = [];
+    let inSingle = false;
+    let inDouble = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+    let stmtStart = 0;
+
+    const push = (end: number) => {
+        const text = source.slice(stmtStart, end).trim();
+        if (text) {
+            // adjust start to first non-ws char
+            const lead = source.slice(stmtStart, end).length - source.slice(stmtStart, end).trimStart().length;
+            spans.push({ text, start: stmtStart + lead, end });
+        }
+    };
+
+    for (let i = 0; i < source.length; i += 1) {
+        const ch = source[i];
+        const next = source[i + 1];
+
+        if (inLineComment) {
+            if (ch === "\n" || ch === "\r") inLineComment = false;
+            continue;
+        }
+        if (inBlockComment) {
+            if (ch === "*" && next === "/") {
+                inBlockComment = false;
+                i += 1;
+            }
+            continue;
+        }
+        if (inSingle) {
+            if (ch === "'" && next === "'") {
+                i += 1;
+                continue;
+            }
+            if (ch === "'") inSingle = false;
+            continue;
+        }
+        if (inDouble) {
+            if (ch === '"' && next === '"') {
+                i += 1;
+                continue;
+            }
+            if (ch === '"') inDouble = false;
+            continue;
+        }
+        if (ch === "-" && next === "-") {
+            inLineComment = true;
+            i += 1;
+            continue;
+        }
+        if (ch === "/" && next === "*") {
+            inBlockComment = true;
+            i += 1;
+            continue;
+        }
+        if (ch === "'") {
+            inSingle = true;
+            continue;
+        }
+        if (ch === '"') {
+            inDouble = true;
+            continue;
+        }
+        if (ch === ";") {
+            push(i);
+            stmtStart = i + 1;
+        }
+    }
+    push(source.length);
+    return spans;
+}
+
+/** Statement whose span contains the caret/selection position. A caret in
+ *  whitespace between statements (or after the final ';') matches nothing. */
+export function statementAt(source: string, pos: number): StatementSpan | undefined {
+    const spans = splitStatements(source);
+    // end is exclusive-ish: the char AT end is the delimiter/whitespace.
+    return spans.find((s) => pos >= s.start && pos < s.end)
+        // caret exactly at the very end of the last statement still counts
+        ?? spans.find((s, i) => i === spans.length - 1 && pos === s.end && s.end === source.trimEnd().length);
+}
+
+/** Statements from the caret/selection position to the end. */
+export function statementsFrom(source: string, pos: number): StatementSpan[] {
+    const spans = splitStatements(source);
+    const idx = spans.findIndex((s) => pos >= s.start && pos < s.end);
+    if (idx < 0) return [];
+    return spans.slice(idx);
+}

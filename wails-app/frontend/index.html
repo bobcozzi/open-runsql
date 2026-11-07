@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IBM i Run SQL</title>
+    <link rel="stylesheet" href="/src/style.css" />
+</head>
+
+<body>
+    <header class="titlebar">
+        <div class="title">
+            <span class="app-name">IBM i Run SQL</span>
+            <span id="conn-badge" class="badge disconnected">Not connected</span>
+        </div>
+        <div class="title-actions">
+            <button id="btn-connect" class="btn">Connect</button>
+            <button id="btn-disconnect" class="btn" disabled>Disconnect</button>
+        </div>
+    </header>
+
+    <nav id="conn-tabs" class="conn-tabs">
+        <div id="conn-tab-list" class="conn-tab-list"></div>
+        <button id="btn-new-conn" class="btn tab-add" title="New connection tab">+</button>
+    </nav>
+
+    <div id="connect-panel" class="connect-panel">
+        <div class="connect-grid">
+            <label>Host
+                <div class="host-combo">
+                    <input id="in-host" type="text" autocomplete="off" placeholder="my.ibmi.host" />
+                    <button id="btn-saved-hosts" class="btn combo-arrow" type="button"
+                        title="Saved connections">&#9662;</button>
+                    <div id="saved-hosts-popup" class="combo-popup" hidden></div>
+                </div>
+            </label>
+            <label>User<input id="in-user" type="text" autocomplete="off" /></label>
+            <label>Password<input id="in-password" type="password" autocomplete="off" /></label>
+            <label>Default schema<input id="in-schema" type="text" autocomplete="off"
+                    placeholder="(optional)" /></label>
+            <label>Naming
+                <select id="in-naming">
+                    <option value="sql" selected>SQL naming</option>
+                    <option value="system">System naming</option>
+                </select>
+            </label>
+            <label class="tls-row"><input id="in-tls" type="checkbox" /> Secure (TLS)</label>
+            <label class="tls-row"
+                title="Store the password base64-obscured in the saved connection file (obscured, not encrypted)">
+                <input id="in-save-password" type="checkbox" /> Save password
+            </label>
+        </div>
+        <div class="profile-row">
+            <span class="profile-hint">Connections are remembered automatically; passwords only if "Save password" is
+                checked (obscured, not encrypted). Right-click a saved connection for options.</span>
+        </div>
+        <div id="connect-error" class="error-text" hidden></div>
+    </div>
+
+    <section class="editor-wrap">
+        <div class="editor-toolbar">
+            <button id="btn-run" class="btn primary icon-btn" disabled
+                title="Run Selected (statement at cursor; Cmd/Ctrl+Enter)">
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path d="M4 2.5v11l9-5.5z" fill="currentColor" />
+                </svg>
+            </button>
+            <button id="btn-run-all" class="btn icon-btn" disabled title="Run All (every statement, first to last)">
+                <svg viewBox="0 0 20 16" width="18" height="14" aria-hidden="true">
+                    <path d="M2 2.5v11l7-5.5z" fill="currentColor" />
+                    <path d="M10 2.5v11l7-5.5z" fill="currentColor" />
+                    <rect x="17" y="2.5" width="1.6" height="11" fill="currentColor" />
+                </svg>
+            </button>
+            <button id="btn-run-from" class="btn icon-btn" disabled
+                title="Run from Selected (cursor statement through the last)">
+                <svg viewBox="0 0 20 16" width="18" height="14" aria-hidden="true">
+                    <path d="M3 2.5v11l7-5.5z" fill="currentColor" />
+                    <path d="M11 2.5v11l7-5.5z" fill="currentColor" />
+                    <rect x="1" y="2.5" width="1.6" height="11" fill="currentColor" />
+                </svg>
+            </button>
+            <button id="btn-cancel" class="btn" disabled title="Cancel running statement">Cancel</button>
+            <button id="btn-prompt" class="btn" disabled title="Prompt CL command (F4)">Prompt</button>
+            <button id="btn-clear" class="btn">Clear</button>
+            <span class="hint">SQL &mdash; or prefix with <code>CL:</code> for IBM i commands (e.g.
+                <code>CL: WRKSYSSTS OUTPUT(*PRINT)</code>)</span>
+        </div>
+        <textarea id="sql-input" class="sql-input" spellcheck="false"
+            placeholder="SELECT * FROM QSYS2.SYSTEM_STATUS_INFO&#10;CL: DSPLIBL OUTPUT(*PRINT)"></textarea>
+    </section>
+
+    <div id="splitter" class="splitter" role="separator" aria-orientation="horizontal" title="Drag to resize"></div>
+
+    <section class="work-area" id="work-area">
+        <div class="work-tabs" id="work-tabs">
+            <button class="work-tab active" data-pane="results" type="button">Results</button>
+            <button class="work-tab" data-pane="messages" type="button">Messages</button>
+            <button id="btn-clear-messages" class="btn tab-action" type="button" title="Clear messages">Clear</button>
+            <!-- Prompter tabs are appended dynamically -->
+            <span class="spacer"></span>
+            <span id="status-text" class="status-inline"></span>
+            <button id="btn-load-more" class="btn" hidden>Load more</button>
+            <button id="btn-load-all" class="btn" hidden>Load all</button>
+        </div>
+
+        <div class="work-pane" id="pane-results" data-pane="results">
+            <div class="table-wrap">
+                <table id="result-table">
+                    <thead id="result-head"></thead>
+                    <tbody id="result-body"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="work-pane" id="pane-messages" data-pane="messages" hidden>
+            <ul id="message-list" class="message-list"></ul>
+        </div>
+
+        <!-- Prompter panes are appended dynamically -->
+
+        <section class="empty-state" id="empty-state">
+            <p>Connect to an IBM i, then run SQL statements or CL commands.</p>
+        </section>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+</body>
+
+</html>

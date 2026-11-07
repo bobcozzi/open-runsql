@@ -1,0 +1,11 @@
+# build artifacts
+wails-app/ibmi-run-sql
+wails-app/ibmi-run-sql.exe
+wails-app/build/
+wails-app/frontend/dist/
+wails-app/frontend/node_modules/
+java-bridge/target/
+go-stub/bridge-test
+ts-client/node_modules/
+*.v2.bak
+.DS_Store

@@ -1,0 +1,8 @@
+{
+  "name": "ibmi-jdbc-bridge-ts-smoke-test",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test-bridge": "node src/test-bridge.mjs"
+  }
+}
