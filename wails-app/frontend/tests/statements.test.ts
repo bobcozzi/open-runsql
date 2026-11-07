@@ -51,4 +51,27 @@ describe("statementAt / statementsFrom", () => {
         const gap = splitStatements(src)[0].end; // right after first ';'
         expect(statementAt(src, gap)).toBeUndefined();
     });
+    it("caret on the blank row after the last statement still runs it (no semicolon)", () => {
+        // "select ...\n<caret>" — Enter pressed, no ';' anywhere (ACS look-back).
+        const noSemi = "select * from qiws.qcustcdt\n";
+        expect(statementAt(noSemi, noSemi.length)?.text).toBe("select * from qiws.qcustcdt");
+    });
+    it("caret after a semicolon-terminated statement at end of text still runs it", () => {
+        const withSemi = "select * from qiws.qcustcdt;\n";
+        expect(statementAt(withSemi, withSemi.length)?.text).toBe("select * from qiws.qcustcdt");
+    });
+    it("trailing CL command without semicolon is found from the next row", () => {
+        const cl = "CL: WRKSYSSTS OUTPUT(*PRINT)\n";
+        expect(statementAt(cl, cl.length)?.text).toBe("CL: WRKSYSSTS OUTPUT(*PRINT)");
+    });
+    it("whitespace fallback does not steal the caret from a following statement", () => {
+        const two = "SELECT 1 FROM SYSIBM.SYSDUMMY1;\n\nSELECT 2 FROM SYSIBM.SYSDUMMY1";
+        const second = splitStatements(two)[1];
+        // caret at start of the second statement -> second statement, not the first
+        expect(statementAt(two, second.start)?.text).toBe("SELECT 2 FROM SYSIBM.SYSDUMMY1");
+    });
+    it("caret on empty text matches nothing", () => {
+        expect(statementAt("", 0)).toBeUndefined();
+        expect(statementAt("   \n  ", 3)).toBeUndefined();
+    });
 });

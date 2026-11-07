@@ -84,13 +84,26 @@ export function splitStatements(source: string): StatementSpan[] {
 }
 
 /** Statement whose span contains the caret/selection position. A caret in
- *  whitespace between statements (or after the final ';') matches nothing. */
+ *  whitespace immediately after a statement's end (e.g. Enter pressed after
+ *  the last line, caret at start of the new row) still counts as "on" that
+ *  statement — matching ACS Run Selected, which looks backward for a
+ *  semicolon or start-of-text, then forward. Only applies when no LATER
+ *  statement exists: on a blank line between two statements the caret belongs
+ *  to neither (the statement at/after the caret wins instead). */
 export function statementAt(source: string, pos: number): StatementSpan | undefined {
     const spans = splitStatements(source);
     // end is exclusive-ish: the char AT end is the delimiter/whitespace.
-    return spans.find((s) => pos >= s.start && pos < s.end)
+    const direct = spans.find((s) => pos >= s.start && pos < s.end)
         // caret exactly at the very end of the last statement still counts
         ?? spans.find((s, i) => i === spans.length - 1 && pos === s.end && s.end === source.trimEnd().length);
+    if (direct) return direct;
+    // Whitespace fallback: caret on empty space right after a statement with
+    // nothing but whitespace until end of text -> that trailing statement.
+    if (source.slice(pos).trim() === "" && spans.length > 0) {
+        const last = spans[spans.length - 1];
+        if (pos >= last.end) return last;
+    }
+    return undefined;
 }
 
 /** Statements from the caret/selection position to the end. */
