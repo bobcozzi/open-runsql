@@ -38,12 +38,13 @@ Architecture: Wails v3.1.0 webview UI → Go service → child-process Java jar
 
 ```sh
 cd open-runsql/wails-app
-make build && ./ibmi-run-sql        # Makefile guards CGO_LDFLAGS to Darwin
-# or: CGO_LDFLAGS="-framework UniformTypeIdentifiers" go build -tags production -o ibmi-run-sql .
+go build -tags production -o ibmi-run-sql . && ./ibmi-run-sql
+# or: make build && ./ibmi-run-sql
 ```
 
-macOS notes: `CGO_LDFLAGS=-framework UniformTypeIdentifiers` was needed for
-Wails v2.17; verify whether v3.1 still needs it (likely not — v3 links differ).
+macOS notes: plain `go build -tags production` works on v3.1 (the old
+`CGO_LDFLAGS=-framework UniformTypeIdentifiers` workaround was Wails v2-only —
+verified unneeded on v3.1.0 on this machine, macOS 27.2 arm64, SDK 13.3).
 Wails CLI: `~/go/bin/wails3` v3.1.0. `wails3 dev` = hot reload.
 
 ## Feature state

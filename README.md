@@ -32,7 +32,7 @@ Command Server or File Server code in `tn5250-desktop`.
 
 ## Requirements
 
-- JDK 17 or later
+- JDK 25 or later
 - Maven 3.9+
 - Go 1.22+
 - Node.js 20+
