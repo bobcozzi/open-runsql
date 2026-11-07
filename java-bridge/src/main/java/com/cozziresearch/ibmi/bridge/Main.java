@@ -215,7 +215,7 @@ public final class Main {
                 try { s.activeStatement.close(); } catch (SQLException ignored) {}
                 s.activeStatement = null;
             }
-            return sqlErrorResult(e, started);
+            return sqlErrorResult(s, e, started);
         } finally {
             s.lock.unlock();
         }
@@ -316,7 +316,7 @@ public final class Main {
             if (!c.more) closeCursor(s, cursorId);
             return result;
         } catch (SQLException e) {
-            return sqlErrorResult(e, started);
+            return sqlErrorResult(s, e, started);
         } finally {
             s.lock.unlock();
         }
@@ -395,7 +395,7 @@ public final class Main {
         return JSON.getNodeFactory().textNode(String.valueOf(value));
     }
 
-    private static ObjectNode sqlErrorResult(SQLException e, long started) {
+    private static ObjectNode sqlErrorResult(Session s, SQLException e, long started) {
         ObjectNode out = JSON.createObjectNode();
         out.put("kind", "error");
         out.set("columns", JSON.createArrayNode());
@@ -404,12 +404,31 @@ public final class Main {
         SQLException x = e;
         while (x != null) {
             ObjectNode m = sqlError(x);
+            String help = sqlMessageHelp(s, nullToEmpty(x.getMessage()));
+            if (!help.isEmpty()) m.put("secondLevelText", help);
             messages.add(m);
             x = x.getNextException();
         }
         out.set("messages", messages);
         out.put("elapsedMs", elapsedMs(started));
         return out;
+    }
+
+    // IBM i SQL/CPF message IDs (SQL0204, CPF9801, ...) can be resolved to
+    // message-file second-level text, same as CL messages. Best effort: any
+    // failure (no ID in text, host unreachable, no authority) yields "".
+    private static String sqlMessageHelp(Session s, String messageText) {
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\\b(SQL\\d{4}|CPF\\d{4}|CPD\\d{4})\\b").matcher(messageText);
+        if (!m.find() || s == null || s.clSystem == null) return "";
+        String id = m.group(1);
+        String msgf = id.startsWith("SQL") ? "/QSYS.LIB/QSQLMSG.MSGF" : "/QSYS.LIB/QCPFMSG.MSGF";
+        try {
+            AS400Message msg = new com.ibm.as400.access.MessageFile(s.clSystem, msgf).getMessage(id);
+            return msg == null ? "" : nullToEmpty(msg.getHelp());
+        } catch (Throwable ignored) {
+            return "";
+        }
     }
 
     private static ObjectNode sqlError(SQLException e) {
