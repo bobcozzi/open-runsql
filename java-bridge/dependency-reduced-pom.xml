@@ -80,7 +80,7 @@
     </dependency>
   </dependencies>
   <properties>
-    <maven.compiler.release>25</maven.compiler.release>
+    <maven.compiler.release>17</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <jackson.version>2.20.1</jackson.version>
     <jt400.version>21.0.7</jt400.version>
