@@ -39,6 +39,7 @@ const els = {
     connectError: el<HTMLDivElement>("connect-error"),
     btnConnect: el<HTMLButtonElement>("btn-connect"),
     btnDisconnect: el<HTMLButtonElement>("btn-disconnect"),
+    themeSelect: el<HTMLSelectElement>("sel-theme"),
     btnRun: el<HTMLButtonElement>("btn-run"),
     btnRunAll: el<HTMLButtonElement>("btn-run-all"),
     btnRunFrom: el<HTMLButtonElement>("btn-run-from"),
@@ -57,6 +58,31 @@ const els = {
     btnLoadMore: el<HTMLButtonElement>("btn-load-more"),
     btnLoadAll: el<HTMLButtonElement>("btn-load-all"),
 };
+
+// --- Color mode (light/dark/system) ---
+type ThemeMode = "light" | "dark" | "system";
+const THEME_KEY = "ibmi-runsql-theme";
+
+function applyTheme(mode: ThemeMode): void {
+    const dark = mode === "dark" ||
+        (mode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+}
+
+function initTheme(): void {
+    const saved = (localStorage.getItem(THEME_KEY) as ThemeMode | null) ?? "system";
+    els.themeSelect.value = saved;
+    applyTheme(saved);
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+        if (els.themeSelect.value === "system") applyTheme("system");
+    });
+    els.themeSelect.addEventListener("change", () => {
+        const mode = els.themeSelect.value as ThemeMode;
+        localStorage.setItem(THEME_KEY, mode);
+        applyTheme(mode);
+    });
+}
+initTheme();
 
 // Static index.html strings: the English markup is the fallback/pre-JS paint;
 // overwrite textContent/title/placeholder from the catalog once at boot.

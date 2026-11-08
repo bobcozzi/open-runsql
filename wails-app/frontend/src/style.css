@@ -15,6 +15,21 @@
     font-size: 13px;
 }
 
+:root[data-theme="light"] {
+    --bg: #ffffff;
+    --bg-alt: #f3f3f3;
+    --bg-input: #ffffff;
+    --border: #d4d4d4;
+    --fg: #1e1e1e;
+    --fg-dim: #6b7280;
+    --accent: #0e639c;
+    --accent-hover: #1177bb;
+    --error: #c72e2e;
+    --warning: #9a7b00;
+    --info: #1a6fd4;
+    --ok: #1e7a5a;
+}
+
 * {
     box-sizing: border-box;
 }
@@ -57,7 +72,17 @@ body {
 .title-actions {
     display: flex;
     gap: 8px;
+    align-items: center;
     -webkit-app-region: no-drag;
+}
+
+.theme-mode select {
+    background: var(--bg-input);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 13px;
 }
 
 /* Connection tabs */
