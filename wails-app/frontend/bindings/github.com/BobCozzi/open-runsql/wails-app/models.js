@@ -474,6 +474,136 @@ export class GetCmdXmlRequest {
     }
 }
 
+export class OutputQueueInfo {
+    /**
+     * Creates a new OutputQueueInfo instance.
+     * @param {Partial<OutputQueueInfo>} [$$source = {}] - The source object to create the OutputQueueInfo.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("library" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["library"] = "";
+        }
+        if (!("description" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["description"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new OutputQueueInfo instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {OutputQueueInfo}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new OutputQueueInfo(/** @type {Partial<OutputQueueInfo>} */($$parsedSource));
+    }
+}
+
+export class OutputQueueListRequest {
+    /**
+     * Creates a new OutputQueueListRequest instance.
+     * @param {Partial<OutputQueueListRequest>} [$$source = {}] - The source object to create the OutputQueueListRequest.
+     */
+    constructor($$source = {}) {
+        if (!("connectionId" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["connectionId"] = "";
+        }
+        if (!("nameFilter" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["nameFilter"] = "";
+        }
+        if (!("libraryFilter" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["libraryFilter"] = "";
+        }
+        if (!("limit" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["limit"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new OutputQueueListRequest instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {OutputQueueListRequest}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new OutputQueueListRequest(/** @type {Partial<OutputQueueListRequest>} */($$parsedSource));
+    }
+}
+
+export class OutputQueueListResult {
+    /**
+     * Creates a new OutputQueueListResult instance.
+     * @param {Partial<OutputQueueListResult>} [$$source = {}] - The source object to create the OutputQueueListResult.
+     */
+    constructor($$source = {}) {
+        if (!("queues" in $$source)) {
+            /**
+             * @member
+             * @type {OutputQueueInfo[]}
+             */
+            this["queues"] = [];
+        }
+        if (!("elapsedMs" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["elapsedMs"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new OutputQueueListResult instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {OutputQueueListResult}
+     */
+    static createFrom($$source = {}) {
+        const $$createField0_0 = $$createType1;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("queues" in $$parsedSource) {
+            $$parsedSource["queues"] = $$createField0_0($$parsedSource["queues"]);
+        }
+        return new OutputQueueListResult(/** @type {Partial<OutputQueueListResult>} */($$parsedSource));
+    }
+}
+
 export class RunRequest {
     /**
      * Creates a new RunRequest instance.
@@ -875,6 +1005,90 @@ export class SpooledFileInfo {
     }
 }
 
+export class SpooledFileMoveRequest {
+    /**
+     * Creates a new SpooledFileMoveRequest instance.
+     * @param {Partial<SpooledFileMoveRequest>} [$$source = {}] - The source object to create the SpooledFileMoveRequest.
+     */
+    constructor($$source = {}) {
+        if (!("connectionId" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["connectionId"] = "";
+        }
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("number" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["number"] = "";
+        }
+        if (!("jobName" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["jobName"] = "";
+        }
+        if (!("jobUser" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["jobUser"] = "";
+        }
+        if (!("jobNumber" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["jobNumber"] = "";
+        }
+        if (!("toLibrary" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["toLibrary"] = "";
+        }
+        if (!("toQueue" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["toQueue"] = "";
+        }
+        if (!("holdFirst" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["holdFirst"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SpooledFileMoveRequest instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {SpooledFileMoveRequest}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SpooledFileMoveRequest(/** @type {Partial<SpooledFileMoveRequest>} */($$parsedSource));
+    }
+}
+
 export class SpooledFileRequest {
     /**
      * Creates a new SpooledFileRequest instance.
@@ -975,7 +1189,7 @@ export class SpooledFileResult {
      * @returns {SpooledFileResult}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType1;
+        const $$createField1_0 = $$createType3;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("files" in $$parsedSource) {
             $$parsedSource["files"] = $$createField1_0($$parsedSource["files"]);
@@ -1122,9 +1336,9 @@ export class SqlResult {
      * @returns {SqlResult}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType3;
-        const $$createField2_0 = $$createType5;
-        const $$createField6_0 = $$createType7;
+        const $$createField1_0 = $$createType5;
+        const $$createField2_0 = $$createType7;
+        const $$createField6_0 = $$createType9;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
             $$parsedSource["columns"] = $$createField1_0($$parsedSource["columns"]);
@@ -1230,8 +1444,8 @@ export class WorkspaceState {
      * @returns {WorkspaceState}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType3;
-        const $$createField4_0 = $$createType5;
+        const $$createField3_0 = $$createType5;
+        const $$createField4_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
             $$parsedSource["columns"] = $$createField3_0($$parsedSource["columns"]);
@@ -1244,11 +1458,13 @@ export class WorkspaceState {
 }
 
 // Private type creation functions
-const $$createType0 = SpooledFileInfo.createFrom;
+const $$createType0 = OutputQueueInfo.createFrom;
 const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = ColumnInfo.createFrom;
+const $$createType2 = SpooledFileInfo.createFrom;
 const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = $Create.Array($Create.Any);
+const $$createType4 = ColumnInfo.createFrom;
 const $$createType5 = $Create.Array($$createType4);
-const $$createType6 = SqlMessage.createFrom;
+const $$createType6 = $Create.Array($Create.Any);
 const $$createType7 = $Create.Array($$createType6);
+const $$createType8 = SqlMessage.createFrom;
+const $$createType9 = $Create.Array($$createType8);

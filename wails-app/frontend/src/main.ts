@@ -164,6 +164,18 @@ function b64ToText(b64: string): string {
     return new TextDecoder("utf-8").decode(bin);
 }
 
+/** Clipboard fallback for non-secure contexts (execCommand copy). */
+function legacyCopy(text: string): void {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch { /* no-op */ }
+    ta.remove();
+}
+
 /** Render the JT400 page stream to clean display text. Each record arrives
  * as "\u0000\u0094{" + one column byte + text; records are separated by
  * "\u0000\n" and pages by "\f". The column byte is the 1-based target column
@@ -175,26 +187,42 @@ export function renderSpoolText(raw: string): { lines: string[]; pageCount: numb
     for (const page of raw.split("\f")) {
         // Page-start PRTCTL Set Mode triple (\u0094 0x44 0x01); a bare \u0094
         // elsewhere is a high-column byte, so strip only that exact triple.
-        const cleaned = page.replace(/\u0094\x44\x01/g, "");
+        let cleaned = page.replace(/\u0094\x44\x01/g, "");
+        // Strip a leading run of control bytes ending in a 0x44 Set-Mode byte
+        // (shows as a stray 'D' at the top of plain line-data reports).
+        cleaned = cleaned.replace(/^[\u0000-\u001F\u0080-\u009F]*\x44/, "");
         let first = true;
         for (const rec of cleaned.split("\u0000\n")) {
             if (!first && rec === "") lines.push("");
             first = false;
+            // Records with no \u0094{ framing are plain text; split any
+            // embedded newlines and emit one line each (no column bytes).
+            if (!rec.includes("\u0094{")) {
+                for (const piece of rec.split("\n")) {
+                    const plain = piece.replace(/[\u0000-\u001F\u0080-\u009F]/g, "").replace(/\s+$/, "");
+                    if (plain) lines.push(plain);
+                }
+                continue;
+            }
             let cur = "";
             for (const seg of rec.split("\u0094{")) {
                 if (!seg) continue;
                 const scs = seg.charCodeAt(0);
                 let text = seg.slice(1);
-                // A "column" byte that is an ASCII letter is report text
-                // (framing byte dropped by the page stream) — put it back.
-                if (scs >= 0x41 && scs <= 0x7A && text) text = seg;
+                // A "column" byte that is an ASCII letter/digit is report text
+                // (framing byte dropped by the page stream) — put it back and
+                // skip column positioning for it.
+                const isText = scs >= 0x41 && scs <= 0x7A;
+                if (isText) text = seg;
                 text = text.replace(/[\u0000-\u001F\u0080-\u009F]/g, "");
                 if (!text) continue;          // pure positioning segment
-                const col = scs >= 0x80 ? scs - 99 : scs - 1;
-                if (col > cur.length && col <= 130) {
-                    cur += " ".repeat(col - cur.length);
-                } else if (cur && !cur.endsWith(" ")) {
-                    cur += " ";
+                if (!isText) {
+                    const col = scs >= 0x80 ? scs - 99 : scs - 1;
+                    if (col > cur.length && col <= 130) {
+                        cur += " ".repeat(col - cur.length);
+                    } else if (cur && !cur.endsWith(" ")) {
+                        cur += " ";
+                    }
                 }
                 cur += text;
             }
@@ -383,6 +411,118 @@ function closeContextMenu(): void {
     contextMenuEl = undefined;
 }
 
+/** CL-style "Move to Output Queue" dialog: Output queue + Library fields,
+ * MOVE/CANCEL buttons, and F4/Select to open a filtered queue picker. */
+function moveSpooledFileDialog(f: SpooledFileInfo): void {
+    const app = App();
+    const target = spoolTarget(f);
+    if (!app || !target) return;
+    const overlay = document.createElement("div");
+    overlay.className = "spool-viewer-overlay";
+    const box = document.createElement("div");
+    box.className = "spool-move-dialog";
+    box.innerHTML = `<div class="spool-move-title">${t("spool.moveTitle", "Move to Output Queue")}</div>
+        <label>${t("spool.moveQueue", "Output queue:")}<input id="mv-outq" type="text" maxlength="10" autocapitalize="off" spellcheck="false" /></label>
+        <label>${t("spool.moveLibrary", "Library:")}<input id="mv-outqlib" type="text" maxlength="10" autocapitalize="off" spellcheck="false" placeholder="*LIBL" /></label>
+        <label class="spool-move-hold">${t("spool.moveHold", "Hold on output queue:")}<select id="mv-hold" class="spool-move-holdfield"><option value="no" selected>*NO</option><option value="yes">*YES</option></select></label>
+        <div class="spool-move-buttons">
+            <span class="spool-f4-hint" id="mv-f4">${t("spool.moveSelect", "F4=List")}</span>
+            <button type="button" id="mv-ok" class="btn primary">${t("spool.moveOk", "Move")}</button>
+            <button type="button" id="mv-cancel" class="btn">${t("spool.moveCancel", "Cancel")}</button>
+        </div>`;
+    overlay.appendChild(box);
+    const close = () => overlay.remove();
+    overlay.addEventListener("click", (ev) => { if (ev.target === overlay) close(); });
+    const outq = box.querySelector<HTMLInputElement>("#mv-outq")!;
+    const outqLib = box.querySelector<HTMLInputElement>("#mv-outqlib")!;
+    const holdSel = box.querySelector<HTMLSelectElement>("#mv-hold")!;
+    box.querySelector("#mv-cancel")!.addEventListener("click", close);
+    const doMove = async () => {
+        const toQueue = outq.value.trim();
+        if (!toQueue) { outq.focus(); return; }
+        try {
+            // Hold first when *YES so the file cannot print on arrival.
+            const holdFirst = holdSel.value === "yes";
+            const res = await app.MoveSpooledFile({ ...target, toLibrary: outqLib.value.trim(), toQueue, holdFirst });
+            appendLogLine(`${res.message}   (${res.elapsedMs} ms)`, res.ok ? "msg-info" : "msg-error", true);
+            close();
+            void refreshSpool(spool.filters());
+        } catch (err) {
+            showMessages([], String((err as Error)?.message ?? err));
+        }
+    };
+    box.querySelector("#mv-ok")!.addEventListener("click", () => void doMove());
+    box.querySelector("#mv-f4")!.addEventListener("click", () => openOutqPicker(target.connectionId, (lib, name) => {
+        outqLib.value = lib; outq.value = name;
+    }));
+    overlay.addEventListener("keydown", (ev) => {
+        if (ev.key === "Escape") close();
+        if (ev.key === "F4") openOutqPicker(target.connectionId, (lib, name) => { outqLib.value = lib; outq.value = name; });
+        if (ev.key === "Enter" && (ev.target as HTMLElement).tagName === "INPUT") void doMove();
+    });
+    document.body.appendChild(overlay);
+    outq.focus();
+}
+
+/** Filterable output-queue picker (F4). Type-to-narrow name/library, capped
+ * result list so large systems stay responsive. */
+function openOutqPicker(connectionId: string, onPick: (lib: string, name: string) => void): void {
+    const app = App();
+    if (!app) return;
+    const overlay = document.createElement("div");
+    overlay.className = "spool-viewer-overlay";
+    const box = document.createElement("div");
+    box.className = "spool-outq-picker";
+    box.innerHTML = `<div class="spool-move-title">${t("spool.pickOutq", "Select an output queue")}</div>
+        <div class="spool-outq-filters">
+            <input id="oq-name" type="text" maxlength="10" placeholder="${t("spool.pickName", "Name (blank = all)")}" autocapitalize="off" spellcheck="false" />
+            <input id="oq-lib" type="text" maxlength="10" placeholder="${t("spool.pickLibrary", "Library (blank = all)")}" autocapitalize="off" spellcheck="false" />
+            <button type="button" id="oq-refresh" class="btn">${t("spool.pickRefresh", "List")}</button>
+        </div>
+        <div id="oq-list" class="spool-outq-list"></div>
+        <div class="spool-move-buttons"><button type="button" id="oq-close" class="btn">${t("spool.moveCancel", "Cancel")}</button></div>`;
+    overlay.appendChild(box);
+    const close = () => overlay.remove();
+    overlay.addEventListener("click", (ev) => { if (ev.target === overlay) close(); });
+    box.querySelector("#oq-close")!.addEventListener("click", close);
+    const nameIn = box.querySelector<HTMLInputElement>("#oq-name")!;
+    const libIn = box.querySelector<HTMLInputElement>("#oq-lib")!;
+    const list = box.querySelector<HTMLDivElement>("#oq-list")!;
+    const load = async () => {
+        list.textContent = t("spool.pickLoading", "Loading...");
+        try {
+            const res = await app.ListOutputQueues({
+                connectionId, nameFilter: nameIn.value.trim(), libraryFilter: libIn.value.trim(), limit: 500,
+            });
+            list.textContent = "";
+            if (res.queues.length === 0) {
+                const d = document.createElement("div");
+                d.className = "spool-outq-empty";
+                d.textContent = t("spool.pickNone", "No output queues match.");
+                list.appendChild(d);
+            }
+            for (const q of res.queues) {
+                const item = document.createElement("button");
+                item.type = "button";
+                item.className = "spool-outq-item";
+                const desc = q.description && q.description !== "*BLANK" ? `  ${q.description}` : "";
+                item.textContent = `${q.library}/${q.name}${desc}`;
+                item.addEventListener("click", () => { onPick(q.library, q.name); close(); });
+                list.appendChild(item);
+            }
+        } catch (err) {
+            list.textContent = String((err as Error)?.message ?? err);
+        }
+    };
+    box.querySelector("#oq-refresh")!.addEventListener("click", () => void load());
+    nameIn.addEventListener("keydown", (e) => { if (e.key === "Enter") void load(); });
+    libIn.addEventListener("keydown", (e) => { if (e.key === "Enter") void load(); });
+    overlay.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
+    document.body.appendChild(overlay);
+    nameIn.focus();
+    void load();
+}
+
 function showSpoolContextMenu(f: SpooledFileInfo, x: number, y: number): void {
     closeContextMenu();
     const menu = document.createElement("div");
@@ -403,10 +543,25 @@ function showSpoolContextMenu(f: SpooledFileInfo, x: number, y: number): void {
         menu.appendChild(d);
     };
     addItem(t("spool.act.view", "View"), () => void viewSpooledFile(f));
+    addItem(t("spool.act.copyRow", "Copy row"), () => {
+        const text = [f.name, f.number, f.jobName, f.jobUser, f.jobNumber, f.userData,
+        (f.outqLib || f.outqName ? `${f.outqLib}/${f.outqName}` : ""),
+        `${f.createDate} ${f.createTime}`.trim(), String(f.pages), String(f.size),
+        f.status, f.holdStatus].join("\t");
+        // navigator.clipboard needs a secure context; fall back to execCommand.
+        const done = () => appendLogLine(t("spool.logCopied", "Copied row to clipboard"), "msg-info", true);
+        if (navigator.clipboard?.writeText) {
+            navigator.clipboard.writeText(text).then(done).catch(() => { legacyCopy(text); done(); });
+        } else {
+            legacyCopy(text);
+            done();
+        }
+    });
     addItem(t("spool.act.dlPdf", "Download as PDF"), () => void downloadSpooledFile(f, "pdf"));
     addItem(t("spool.act.dlText", "Download as Text"), () => void downloadSpooledFile(f, "text"));
     addItem(t("spool.act.print", "Print locally"), () => void printSpooledFile(f));
     sep();
+    addItem(t("spool.act.move", "Move..."), () => moveSpooledFileDialog(f));
     addItem(t("spool.act.hold", "Hold"), () => void spoolAction(f, "hold"));
     addItem(t("spool.act.release", "Release"), () => void spoolAction(f, "release"));
     addItem(t("spool.act.delete", "Delete"), () => void spoolAction(f, "delete"), true);

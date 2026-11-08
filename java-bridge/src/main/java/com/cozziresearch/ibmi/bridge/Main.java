@@ -174,6 +174,18 @@ public final class Main {
                         required(r, "name"), required(r, "number"), required(r, "jobName"),
                         required(r, "jobUser"), required(r, "jobNumber")));
             }
+            case "moveSpooledFile" -> {
+                Session s = session(r);
+                out.set("result", moveSpooledFile(s, required(r, "name"), required(r, "number"),
+                        required(r, "jobName"), required(r, "jobUser"), required(r, "jobNumber"),
+                        text(r, "toLibrary", ""), required(r, "toQueue"),
+                        r.path("holdFirst").asBoolean(false)));
+            }
+            case "listOutputQueues" -> {
+                Session s = session(r);
+                out.set("result", listOutputQueues(s, text(r, "nameFilter", ""),
+                        text(r, "libraryFilter", ""), r.path("limit").asInt(200)));
+            }
             case "commit" -> { Session s = session(r); s.lock.lock(); try { s.connection.commit(); } finally { s.lock.unlock(); } }
             case "rollback" -> { Session s = session(r); s.lock.lock(); try { s.connection.rollback(); } finally { s.lock.unlock(); } }
             case "setAutoCommit" -> {
@@ -461,6 +473,74 @@ public final class Main {
         } finally {
             try { list.close(); } catch (Exception ignored) {}
         }
+        result.put("elapsedMs", elapsedMs(started));
+        return result;
+    }
+
+    /** Move a spooled file to another output queue. When holdFirst is set, the
+        file is held on the SAME open list before the move so it cannot start
+        printing on arrival at the target queue. */
+    private static ObjectNode moveSpooledFile(Session s, String name, String number,
+            String jobName, String jobUser, String jobNumber, String toLib, String toQueue,
+            boolean holdFirst) throws Exception {
+        long started = System.nanoTime();
+        SpooledFileList list = newListForUser(s.clSystem, jobUser);
+        ObjectNode result = JSON.createObjectNode();
+        try {
+            SpooledFile f = findSpooledFile(list, name, number, jobName, jobUser, jobNumber);
+            if (f == null) {
+                result.put("ok", false);
+                result.put("message", "Spooled file not found: " + name);
+            } else {
+                String lib = toLib == null || toLib.isBlank() ? "*LIBL"
+                        : toLib.trim().toUpperCase(Locale.ROOT);
+                String q = toQueue == null ? "" : toQueue.trim().toUpperCase(Locale.ROOT);
+                if (q.isEmpty()) throw new IllegalArgumentException("Target output queue is required");
+                if (holdFirst) f.hold("*IMMED");
+                com.ibm.as400.access.OutputQueue target =
+                        new com.ibm.as400.access.OutputQueue(s.clSystem, "/QSYS.LIB/" + lib + ".LIB/" + q + ".OUTQ");
+                f.move(target);
+                result.put("ok", true);
+                result.put("message", (holdFirst ? "Held and moved " : "Moved ") + name + " to " + lib + "/" + q);
+            }
+        } finally {
+            try { list.close(); } catch (Exception ignored) {}
+        }
+        result.put("elapsedMs", elapsedMs(started));
+        return result;
+    }
+
+    /** List output queues matching an optional name/library filter. Results are
+        capped ( callers pass a limit ) so thousands of queues don't flood the UI. */
+    private static ObjectNode listOutputQueues(Session s, String nameFilter, String libFilter,
+            int limit) throws Exception {
+        long started = System.nanoTime();
+        String lib = libFilter == null || libFilter.isBlank() ? "%ALL%"
+                : libFilter.trim().toUpperCase(Locale.ROOT);
+        String q = nameFilter == null || nameFilter.isBlank() ? "%ALL%"
+                : nameFilter.trim().toUpperCase(Locale.ROOT);
+        com.ibm.as400.access.OutputQueueList list = new com.ibm.as400.access.OutputQueueList(s.clSystem);
+        ArrayNode queues = JSON.createArrayNode();
+        try {
+            list.setQueueFilter("/QSYS.LIB/" + lib + ".LIB/" + q + ".OUTQ");
+            list.openSynchronously();
+            int count = 0;
+            Enumeration<com.ibm.as400.access.OutputQueue> e = list.getObjects();
+            while (e.hasMoreElements() && count < limit) {
+                com.ibm.as400.access.OutputQueue oq = e.nextElement();
+                ObjectNode node = JSON.createObjectNode();
+                node.put("name", splfStr(oq::getName));
+                node.put("library", splfStr(() -> oq.getStringAttribute(ATTR_OUTQUELIB)));
+                node.put("description", splfStr(() -> oq.getStringAttribute(PrintObject.ATTR_DESCRIPTION)));
+                queues.add(node);
+                count++;
+            }
+        } finally {
+            try { list.close(); } catch (Exception ignored) {}
+        }
+        ObjectNode result = JSON.createObjectNode();
+        result.put("kind", "outputQueues");
+        result.set("queues", queues);
         result.put("elapsedMs", elapsedMs(started));
         return result;
     }

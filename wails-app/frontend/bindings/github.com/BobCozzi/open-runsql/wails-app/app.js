@@ -142,6 +142,18 @@ export function ListDetached() {
 }
 
 /**
+ * ListOutputQueues lists output queues matching optional name/library filters,
+ * capped at limit (default 200) so large systems don't flood the picker.
+ * @param {$models.OutputQueueListRequest} req
+ * @returns {$CancellablePromise<$models.OutputQueueListResult | null>}
+ */
+export function ListOutputQueues(req) {
+    return $Call.ByID(839594708, req).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType13($result);
+    }));
+}
+
+/**
  * ListSpooledFiles lists spooled files on the connection, filtered by user
  * and/or output queue (blank user = *CURRENT; allUsers/allOutqs widen scope).
  * @param {$models.SpooledFileRequest} req
@@ -149,7 +161,7 @@ export function ListDetached() {
  */
 export function ListSpooledFiles(req) {
     return $Call.ByID(2924065984, req).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType13($result);
+        return $$createType15($result);
     }));
 }
 
@@ -159,7 +171,7 @@ export function ListSpooledFiles(req) {
  */
 export function ListWorkspaces() {
     return $Call.ByID(1856021707).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType14($result);
+        return $$createType16($result);
     }));
 }
 
@@ -170,6 +182,17 @@ export function ListWorkspaces() {
  */
 export function MoveConnectionProfileToTop(name) {
     return $Call.ByID(2667213443, name);
+}
+
+/**
+ * MoveSpooledFile moves a spooled file to another output queue.
+ * @param {$models.SpooledFileMoveRequest} req
+ * @returns {$CancellablePromise<$models.SpooledFileActionResult | null>}
+ */
+export function MoveSpooledFile(req) {
+    return $Call.ByID(2723128684, req).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType18($result);
+    }));
 }
 
 /**
@@ -230,7 +253,7 @@ export function SaveSpooledFile(filename, base64Data) {
  */
 export function SpooledFileAction(req) {
     return $Call.ByID(187847301, req).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType16($result);
+        return $$createType18($result);
     }));
 }
 
@@ -285,8 +308,10 @@ const $$createType8 = $models.WorkspaceState.createFrom;
 const $$createType9 = $models.ConnectionProfile.createFrom;
 const $$createType10 = $Create.Array($$createType9);
 const $$createType11 = $Create.Array($Create.Any);
-const $$createType12 = $models.SpooledFileResult.createFrom;
+const $$createType12 = $models.OutputQueueListResult.createFrom;
 const $$createType13 = $Create.Nullable($$createType12);
-const $$createType14 = $Create.Array($$createType8);
-const $$createType15 = $models.SpooledFileActionResult.createFrom;
-const $$createType16 = $Create.Nullable($$createType15);
+const $$createType14 = $models.SpooledFileResult.createFrom;
+const $$createType15 = $Create.Nullable($$createType14);
+const $$createType16 = $Create.Array($$createType8);
+const $$createType17 = $models.SpooledFileActionResult.createFrom;
+const $$createType18 = $Create.Nullable($$createType17);

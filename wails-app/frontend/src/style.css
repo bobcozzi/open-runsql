@@ -988,6 +988,18 @@ tr:nth-child(even) td {
     cursor: default;
 }
 
+/* Cells start unselectable so right-click never grabs text; left-mousedown
+ * flips to selectable for deliberate drag-select (see spool.ts). */
+.spool-table td {
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.spool-table td.spool-textsel {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
 .spool-table tbody tr:hover {
     background: var(--bg-alt);
 }
@@ -1040,6 +1052,121 @@ tr:nth-child(even) td {
     font-family: "SF Mono", Menlo, Consolas, monospace;
     font-size: 12px;
     color: var(--fg);
+}
+
+/* Move-to-output-queue dialog + F4 picker. */
+.spool-move-dialog,
+.spool-outq-picker {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 320px;
+}
+
+.spool-move-title {
+    font-weight: 600;
+    color: var(--fg);
+    margin-bottom: 4px;
+}
+
+.spool-move-dialog label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--fg);
+    font-size: 13px;
+}
+
+.spool-move-dialog label.spool-move-hold {
+    justify-content: flex-start;
+}
+
+select.spool-move-holdfield {
+    background: var(--bg-input);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    width: auto;
+    flex: 0 0 auto;
+}
+
+.spool-move-dialog input,
+.spool-outq-filters input {
+    background: var(--bg-input);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    text-transform: uppercase;
+    flex: 1;
+}
+
+.spool-move-buttons {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    align-items: center;
+    margin-top: 6px;
+}
+
+.spool-f4-hint {
+    margin-right: auto;
+    color: var(--fg-dim);
+    font-size: 12px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.spool-f4-hint:hover {
+    color: var(--accent);
+}
+
+.spool-outq-picker {
+    width: min(560px, 90vw);
+    max-height: 70vh;
+}
+
+.spool-outq-filters {
+    display: flex;
+    gap: 8px;
+}
+
+.spool-outq-list {
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    max-height: 50vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.spool-outq-item {
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: var(--fg);
+    padding: 5px 10px;
+    cursor: pointer;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+}
+
+.spool-outq-item:hover {
+    background: var(--accent);
+}
+
+.spool-outq-empty {
+    padding: 12px;
+    color: var(--fg-dim);
+    text-align: center;
 }
 
 .spool-viewer-content {

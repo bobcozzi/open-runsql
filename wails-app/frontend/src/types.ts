@@ -123,6 +123,17 @@ export interface SpooledFileDataResult {
     elapsedMs: number;
 }
 
+export interface OutputQueueInfo {
+    name: string;
+    library: string;
+    description: string;
+}
+
+export interface OutputQueueListResult {
+    queues: OutputQueueInfo[];
+    elapsedMs: number;
+}
+
 export interface ConnectionProfile {
     name: string;
     host: string;
@@ -149,6 +160,8 @@ export interface AppBinding {
     GetCmdXml(req: { connectionId: string; command: string; library?: string }): Promise<CmdXmlResult>;
     ListSpooledFiles(req: SpooledFileRequest): Promise<SpooledFileResult>;
     SpooledFileAction(req: SpooledFileTarget & { action: string }): Promise<SpooledFileActionResult>;
+    MoveSpooledFile(req: SpooledFileTarget & { toLibrary: string; toQueue: string; holdFirst: boolean }): Promise<SpooledFileActionResult>;
+    ListOutputQueues(req: { connectionId: string; nameFilter: string; libraryFilter: string; limit: number }): Promise<OutputQueueListResult>;
     GetSpooledFileData(req: SpooledFileTarget & { format: string }): Promise<SpooledFileDataResult>;
     SaveSpooledFile(filename: string, base64Data: string): Promise<string>;
     PrintSpooledFile(filename: string, base64Data: string): Promise<string>;

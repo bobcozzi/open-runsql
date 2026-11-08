@@ -178,6 +178,31 @@ type SpooledFileDataRequest struct {
 	Format string `json:"format"` // text | pdf
 }
 
+type SpooledFileMoveRequest struct {
+	SpooledFileTarget
+	ToLibrary string `json:"toLibrary"`
+	ToQueue   string `json:"toQueue"`
+	HoldFirst bool   `json:"holdFirst"`
+}
+
+type OutputQueueInfo struct {
+	Name        string `json:"name"`
+	Library     string `json:"library"`
+	Description string `json:"description"`
+}
+
+type OutputQueueListRequest struct {
+	ConnectionID  string `json:"connectionId"`
+	NameFilter    string `json:"nameFilter"`
+	LibraryFilter string `json:"libraryFilter"`
+	Limit         int    `json:"limit"`
+}
+
+type OutputQueueListResult struct {
+	Queues    []OutputQueueInfo `json:"queues"`
+	ElapsedMs int64             `json:"elapsedMs"`
+}
+
 type SpooledFileActionResult struct {
 	OK        bool   `json:"ok"`
 	Message   string `json:"message"`
@@ -825,6 +850,66 @@ func (a *App) GetSpooledFileData(req SpooledFileDataRequest) (*SpooledFileDataRe
 		Kind: str2(raw, "kind"), Format: str2(raw, "format"), Bytes: int64Val(raw["bytes"]),
 		Base64: str2(raw, "base64"), ElapsedMs: int64Val(raw["elapsedMs"]),
 	}, nil
+}
+
+// MoveSpooledFile moves a spooled file to another output queue.
+func (a *App) MoveSpooledFile(req SpooledFileMoveRequest) (*SpooledFileActionResult, error) {
+	a.mu.Lock()
+	c := a.client
+	_, known := a.connections[req.ConnectionID]
+	a.mu.Unlock()
+	if c == nil || !known {
+		return nil, errors.New("not connected")
+	}
+	params := spoolTargetParams(req.SpooledFileTarget)
+	params["toLibrary"] = strings.TrimSpace(req.ToLibrary)
+	params["toQueue"] = strings.TrimSpace(req.ToQueue)
+	params["holdFirst"] = req.HoldFirst
+	resp, err := c.Call("moveSpooledFile", params)
+	if err != nil {
+		return nil, err
+	}
+	raw, _ := resp["result"].(map[string]any)
+	return &SpooledFileActionResult{
+		OK: boolVal(raw["ok"]), Message: str2(raw, "message"), ElapsedMs: int64Val(raw["elapsedMs"]),
+	}, nil
+}
+
+// ListOutputQueues lists output queues matching optional name/library filters,
+// capped at limit (default 200) so large systems don't flood the picker.
+func (a *App) ListOutputQueues(req OutputQueueListRequest) (*OutputQueueListResult, error) {
+	a.mu.Lock()
+	c := a.client
+	_, known := a.connections[req.ConnectionID]
+	a.mu.Unlock()
+	if c == nil || !known {
+		return nil, errors.New("not connected")
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 200
+	}
+	resp, err := c.Call("listOutputQueues", map[string]any{
+		"connectionId":  req.ConnectionID,
+		"nameFilter":    strings.TrimSpace(req.NameFilter),
+		"libraryFilter": strings.TrimSpace(req.LibraryFilter),
+		"limit":         limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	raw, _ := resp["result"].(map[string]any)
+	queues := []OutputQueueInfo{}
+	if arr, ok := raw["queues"].([]any); ok {
+		for _, item := range arr {
+			if m, ok := item.(map[string]any); ok {
+				queues = append(queues, OutputQueueInfo{
+					Name: str2(m, "name"), Library: str2(m, "library"), Description: str2(m, "description"),
+				})
+			}
+		}
+	}
+	return &OutputQueueListResult{Queues: queues, ElapsedMs: int64Val(raw["elapsedMs"])}, nil
 }
 
 // SaveSpooledFile writes base64 content to ~/Downloads/<filename>, returning

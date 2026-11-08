@@ -189,8 +189,8 @@ export function createSpoolPane(opts: SpoolPaneOptions): SpoolPaneHandle {
 
     filterRow.appendChild(userLabel);
     filterRow.appendChild(allUsersLabel);
-    filterRow.appendChild(outqLibLabel);
     filterRow.appendChild(outqLabel);
+    filterRow.appendChild(outqLibLabel);
     filterRow.appendChild(allOutqsLabel);
     filterRow.appendChild(refreshBtn);
     filterRow.appendChild(clearBtn);
@@ -203,6 +203,23 @@ export function createSpoolPane(opts: SpoolPaneOptions): SpoolPaneHandle {
     const thead = document.createElement("thead");
     const tbody = document.createElement("tbody");
     tbody.className = "spool-body";
+    // Capture-phase: right-mousedown suppresses selection. Left-mousedown
+    // enables drag-select and KEEPS it after release; the next left-press or
+    // any right-press reverts cells to unselected.
+    const setSel = (on: boolean) => {
+        tbody.querySelectorAll("td").forEach((td) => td.classList.toggle("spool-textsel", on));
+    };
+    tbody.addEventListener("mousedown", (ev) => {
+        const me = ev as MouseEvent;
+        if (me.button === 2) {
+            setSel(false);
+            ev.preventDefault();
+        } else if (me.button === 0) {
+            // If already selectable from a prior drag, a fresh left press that
+            // isn't a drag should clear it (handled on mouseup via drag detect).
+            if (!tbody.querySelector("td.spool-textsel")) setSel(true);
+        }
+    }, true);
     table.appendChild(thead);
     table.appendChild(tbody);
     wrap.appendChild(table);
@@ -292,7 +309,32 @@ export function createSpoolPane(opts: SpoolPaneOptions): SpoolPaneHandle {
                 tbody.querySelectorAll("tr.spool-selected").forEach((r) => r.classList.remove("spool-selected"));
                 tr.classList.add("spool-selected");
             };
-            tr.addEventListener("click", selectRow);
+            // Row highlight only on a clean click (no drag). A left-button
+            // down+drag is the user's deliberate text selection — leave the
+            // native selection alone and don't steal the row highlight.
+            let downX = 0, downY = 0, dragged = false;
+            tr.addEventListener("mousedown", (ev) => {
+                const me = ev as MouseEvent;
+                if (me.button === 2) return; // right-click handled at tbody capture
+                downX = me.clientX; downY = me.clientY; dragged = false;
+                const move = (e: Event) => {
+                    const mm = e as MouseEvent;
+                    if (Math.abs(mm.clientX - downX) > 4 || Math.abs(mm.clientY - downY) > 4) dragged = true;
+                };
+                const up = () => {
+                    document.removeEventListener("mousemove", move);
+                    document.removeEventListener("mouseup", up);
+                };
+                document.addEventListener("mousemove", move);
+                document.addEventListener("mouseup", up);
+            });
+            tr.addEventListener("click", () => {
+                if (!dragged) {
+                    selectRow();
+                    // Clean click: revert cells to unselected for next time.
+                    tbody.querySelectorAll("td.spool-textsel").forEach((td) => td.classList.remove("spool-textsel"));
+                }
+            });
             tr.addEventListener("contextmenu", (ev) => {
                 if (!opts.onRowContext) return;
                 ev.preventDefault();
