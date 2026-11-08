@@ -157,6 +157,21 @@ const en: Catalog = {
     "spool.logListed": "Listed {count} spooled file(s)   ({ms} ms)",
     "spool.logFailed": "List spooled files failed   ({ms} ms)",
     "spool.statusCount": "{count} spooled file(s) in {ms} ms",
+    "spool.close": "Close",
+    "spool.act.view": "View",
+    "spool.act.dlPdf": "Download as PDF",
+    "spool.act.dlText": "Download as Text",
+    "spool.act.hold": "Hold",
+    "spool.act.release": "Release",
+    "spool.act.delete": "Delete",
+    "spool.act.print": "Print locally",
+    "spool.confirmDelete": "Delete spooled file {name}?",
+    "spool.logView": "View {name}...",
+    "spool.logDownload": "Download {name} as {fmt}...",
+    "spool.logSaved": "Saved to {path}",
+    "spool.logPrint": "Print {name}...",
+    "spool.logPrinted": "Sent {name} to the OS print handler",
+    "spool.statusSaved": "Saved {path}",
 };
 
 const CATALOGS: Record<string, () => Catalog> = {

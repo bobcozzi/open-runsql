@@ -12,25 +12,41 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed embed/ibmi-jdbc-bridge.jar
+var jarFS embed.FS
+
+// resolveJar: honor IBMI_JDBC_BRIDGE_JAR when set; otherwise extract the
+// embedded jar to the user cache dir once and use that path.
+func resolveJar() string {
+	if j := os.Getenv("IBMI_JDBC_BRIDGE_JAR"); j != "" {
+		return j
+	}
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		dir = os.TempDir()
+	}
+	out := filepath.Join(dir, "ibmi-runsql", "ibmi-jdbc-bridge.jar")
+	if _, err := os.Stat(out); err == nil {
+		return out
+	}
+	data, err := jarFS.ReadFile("embed/ibmi-jdbc-bridge.jar")
+	if err != nil {
+		return ""
+	}
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return ""
+	}
+	if err := os.WriteFile(out, data, 0o644); err != nil {
+		return ""
+	}
+	return out
+}
+
 func main() {
-	jar := os.Getenv("IBMI_JDBC_BRIDGE_JAR")
+	jar := resolveJar()
 	if jar == "" {
-		exe, err := os.Executable()
-		base := "."
-		if err == nil {
-			base = filepath.Dir(exe)
-		}
-		candidates := []string{
-			filepath.Join(base, "ibmi-jdbc-bridge.jar"),
-			filepath.Join(base, "..", "java-bridge", "target", "ibmi-jdbc-bridge.jar"),
-			filepath.Join("..", "java-bridge", "target", "ibmi-jdbc-bridge.jar"),
-		}
-		for _, c := range candidates {
-			if _, err := os.Stat(c); err == nil {
-				jar = c
-				break
-			}
-		}
+		fmt.Fprintln(os.Stderr, "could not resolve the JDBC bridge jar")
+		os.Exit(1)
 	}
 
 	app := application.New(application.Options{

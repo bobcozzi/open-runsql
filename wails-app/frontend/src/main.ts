@@ -23,6 +23,7 @@ import { arrowRecallDirection, InputHistoryStore } from "./inputHistory";
 import { parseCmdXml } from "./clprompter/prompterModel";
 import { showPrompter } from "./clprompter/prompterView";
 import { buildSpooledFileRequest, createSpoolPane, type SpoolFilters } from "./spool";
+import type { SpooledFileInfo } from "./types";
 import { t } from "./l10n";
 
 function el<T extends HTMLElement>(id: string): T {
@@ -145,9 +146,251 @@ function showPane(name: string): void {
 const spoolState = { loadedFor: "" };
 const spool = createSpoolPane({
     onRefresh: (filters) => void refreshSpool(filters),
-    // Stage 2: onRowOpen -> spooled-file viewer (PDF/text).
+    onRowOpen: (f) => void viewSpooledFile(f),
+    onRowContext: (f, x, y) => showSpoolContextMenu(f, x, y),
 });
 els.workArea.appendChild(spool.root);
+
+type SpoolTarget = { connectionId: string; name: string; number: string; jobName: string; jobUser: string; jobNumber: string };
+
+function spoolTarget(f: SpooledFileInfo): SpoolTarget | null {
+    const connectionId = activeTab()?.connectionId ?? "";
+    if (!connectionId) return null;
+    return { connectionId, name: f.name, number: f.number, jobName: f.jobName, jobUser: f.jobUser, jobNumber: f.jobNumber };
+}
+
+function b64ToText(b64: string): string {
+    const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    return new TextDecoder("utf-8").decode(bin);
+}
+
+/** Render the JT400 page stream to clean display text. Each record arrives
+ * as "\u0000\u0094{" + one SCS column/line-control byte + text; records are
+ * separated by "\u0000\n". The SCS byte is a column tab when > 0x20 (pad to
+ * column) or a line-control otherwise. Framing is compared as character codes
+ * on the decoded string. Returns { lines, pageCount }. */
+export function renderSpoolText(raw: string): { lines: string[]; pageCount: number } {
+    const lines: string[] = [];
+    for (const page of raw.split("\f")) {
+        // Page-start PRTCTL: \u0094 0x44 0x01 (Set Mode) — only strip that
+        // exact triple; a bare \u0094 elsewhere is a high-column SCS byte.
+        const cleaned = page.replace(/\u0094\x44\x01/g, "");
+        let first = true;
+        for (const rec of cleaned.split("\u0000\n")) {
+            if (!first && rec === "") lines.push("");
+            first = false;
+            let cur = "";
+            for (const seg of rec.split("\u0094{")) {
+                if (!seg) continue;
+                const scs = seg.charCodeAt(0);
+                let text = seg.slice(1);
+                // A "column" byte that is an ASCII letter is report text
+                // (the framing byte was dropped by the page stream) — put it
+                // back. Real column bytes are control chars or punctuation.
+                if (scs >= 0x41 && scs <= 0x7A && text) {
+                    text = seg;
+                }
+                text = text.replace(/[\u0000-\u001F\u0080-\u009F]/g, "");
+                if (!text) continue;          // pure positioning segment
+                // Byte after the record marker = absolute 1-based column.
+                // High-bit bytes are the stream's EBCDIC column form: byte-108
+                // (verified against the report layout). Low bytes are direct.
+                const col = scs >= 0x80 ? scs - 106 : scs - 1;
+                if (col > cur.length && col <= 120) {
+                    cur += " ".repeat(col - cur.length);
+                } else if (cur && !cur.endsWith(" ")) {
+                    cur += " ";
+                }
+                cur += text;
+            }
+            cur = cur.replace(/\s+$/, "");
+            if (cur) lines.push(cur);
+        }
+    }
+    return { lines, pageCount: raw.split("\f").length };
+}
+
+/** Build a minimal single-font text PDF from decoded spooled text, returned as
+ * base64. No host print transform needed. */
+export function textToPdfBase64(text: string): string {
+    const { lines } = renderSpoolText(text);
+    const perPage = 54; // ~66-line page minus margins
+    const pages: string[] = [];
+    for (let i = 0; i < lines.length; i += perPage) {
+        pages.push(lines.slice(i, i + perPage).join("\n"));
+    }
+    if (pages.length === 0) pages.push("");
+
+    const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+    const objects: string[] = [];
+    // 1 catalog, 2 pages, 3 font, then per-page: page obj + content obj.
+    objects[0] = "<< /Type /Catalog /Pages 2 0 R >>";
+    const pageCount = pages.length;
+    const kids = pages.map((_, i) => `${4 + i * 2} 0 R`).join(" ");
+    objects[1] = `<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>`;
+    objects[2] = "<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>";
+    pages.forEach((pg, i) => {
+        const pageObj = 4 + i * 2;
+        const contentObj = pageObj + 1;
+        objects[pageObj - 1] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObj} 0 R >>`;
+        let stream = "BT /F1 9 Tf 40 750 Td 11 TL\n";
+        for (const ln of pg.split("\n")) stream += `(${esc(ln)}) Tj T*\n`;
+        stream += "ET";
+        objects[contentObj - 1] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+    });
+
+    let pdf = "%PDF-1.4\n";
+    const offsets: number[] = [];
+    objects.forEach((body, idx) => {
+        offsets.push(pdf.length);
+        pdf += `${idx + 1} 0 obj\n${body}\nendobj\n`;
+    });
+    const xrefPos = pdf.length;
+    pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+    for (const off of offsets) pdf += `${String(off).padStart(10, "0")} 00000 n \n`;
+    pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF`;
+    return btoa(pdf);
+}
+
+/** Text viewer overlay for a spooled file (View / double-click). */
+async function viewSpooledFile(f: SpooledFileInfo): Promise<void> {
+    const app = App();
+    const target = spoolTarget(f);
+    if (!app || !target) return;
+    appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logView", "View {name}...").replace("{name}", f.name)}`, "msg-action");
+    try {
+        const res = await app.GetSpooledFileData({ ...target, format: "text" });
+        const overlay = document.createElement("div");
+        overlay.className = "spool-viewer-overlay";
+        const box = document.createElement("div");
+        box.className = "spool-viewer";
+        const head = document.createElement("div");
+        head.className = "spool-viewer-head";
+        const title = document.createElement("span");
+        title.className = "spool-viewer-title";
+        title.textContent = `${f.name}  ${f.jobNumber}/${f.jobUser}/${f.jobName}`;
+        const closeBtn = document.createElement("button");
+        closeBtn.type = "button";
+        closeBtn.className = "btn";
+        closeBtn.textContent = t("spool.close", "Close");
+        closeBtn.addEventListener("click", () => overlay.remove());
+        head.appendChild(title);
+        head.appendChild(closeBtn);
+        const pre = document.createElement("pre");
+        pre.className = "spool-viewer-content";
+        // Clean SCS control bytes; keep line spacing and page breaks visible.
+        pre.textContent = renderSpoolText(b64ToText(res.base64 ?? "")).lines.join("\n");
+        box.appendChild(head);
+        box.appendChild(pre);
+        overlay.appendChild(box);
+        overlay.addEventListener("click", (ev) => { if (ev.target === overlay) overlay.remove(); });
+        document.addEventListener("keydown", function onEsc(ev) {
+            if (ev.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", onEsc); }
+        });
+        document.body.appendChild(overlay);
+    } catch (err) {
+        showMessages([], String((err as Error)?.message ?? err));
+    }
+}
+
+/** Download a spooled file as PDF or text to ~/Downloads. */
+async function downloadSpooledFile(f: SpooledFileInfo, format: "pdf" | "text"): Promise<void> {
+    const app = App();
+    const target = spoolTarget(f);
+    if (!app || !target) return;
+    appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logDownload", "Download {name} as {fmt}...").replace("{name}", f.name).replace("{fmt}", format.toUpperCase())}`, "msg-action");
+    try {
+        let base64: string;
+        if (format === "pdf") {
+            // Build the PDF client-side from the decoded text — no host print
+            // transform needed.
+            const textRes = await app.GetSpooledFileData({ ...target, format: "text" });
+            base64 = textToPdfBase64(b64ToText(textRes.base64 ?? ""));
+        } else {
+            // Text download: same cleaned rendering the viewer shows, then
+            // re-encode as base64 for the Go save routine.
+            const res = await app.GetSpooledFileData({ ...target, format });
+            const text = renderSpoolText(b64ToText(res.base64 ?? "")).lines.join("\n");
+            base64 = btoa(unescape(encodeURIComponent(text)));
+        }
+        const saved = await app.SaveSpooledFile(`${f.name.trim()}_${f.jobNumber.trim()}.${format === "pdf" ? "pdf" : "txt"}`, base64);
+        appendLogLine(t("spool.logSaved", "Saved to {path}").replace("{path}", saved), "msg-info", true);
+        els.statusText.textContent = t("spool.statusSaved", "Saved {path}").replace("{path}", saved);
+        // Open the download with the OS default handler so the user can view it.
+        await app.OpenSpooledFile(saved);
+    } catch (err) {
+        showMessages([], String((err as Error)?.message ?? err));
+    }
+}
+
+/** Print locally: fetch the PDF and hand it to the OS (print dialog). */
+async function printSpooledFile(f: SpooledFileInfo): Promise<void> {
+    const app = App();
+    const target = spoolTarget(f);
+    if (!app || !target) return;
+    appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logPrint", "Print {name}...").replace("{name}", f.name)}`, "msg-action");
+    try {
+        const textRes = await app.GetSpooledFileData({ ...target, format: "text" });
+        const base64 = textToPdfBase64(b64ToText(textRes.base64 ?? ""));
+        await app.PrintSpooledFile(`${f.name.trim()}_${f.jobNumber.trim()}.pdf`, base64);
+        appendLogLine(t("spool.logPrinted", "Sent {name} to the OS print handler").replace("{name}", f.name), "msg-info", true);
+    } catch (err) {
+        showMessages([], String((err as Error)?.message ?? err));
+    }
+}
+
+async function spoolAction(f: SpooledFileInfo, action: "hold" | "release" | "delete"): Promise<void> {
+    const app = App();
+    const target = spoolTarget(f);
+    if (!app || !target) return;
+    // Delete is destructive — require the row be the right-click-selected one
+    // (the context menu only opens on the selected row, so this is the guard).
+    appendLogLine(`[ ${nowStamp()} ]  ${action} ${f.name}...`, "msg-action");
+    try {
+        const res = await app.SpooledFileAction({ ...target, action });
+        appendLogLine(`${res.message}   (${res.elapsedMs} ms)`, res.ok ? "msg-info" : "msg-error", true);
+        void refreshSpool(spool.filters());
+    } catch (err) {
+        showMessages([], String((err as Error)?.message ?? err));
+    }
+}
+
+let contextMenuEl: HTMLDivElement | undefined;
+function closeContextMenu(): void {
+    contextMenuEl?.remove();
+    contextMenuEl = undefined;
+}
+
+function showSpoolContextMenu(f: SpooledFileInfo, x: number, y: number): void {
+    closeContextMenu();
+    const menu = document.createElement("div");
+    menu.className = "context-menu";
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    const addItem = (label: string, action: () => void, danger = false) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "context-item" + (danger ? " danger" : "");
+        item.textContent = label;
+        item.addEventListener("click", () => { closeContextMenu(); action(); });
+        menu.appendChild(item);
+    };
+    const sep = () => {
+        const d = document.createElement("div");
+        d.className = "context-sep";
+        menu.appendChild(d);
+    };
+    addItem(t("spool.act.view", "View"), () => void viewSpooledFile(f));
+    addItem(t("spool.act.dlPdf", "Download as PDF"), () => void downloadSpooledFile(f, "pdf"));
+    addItem(t("spool.act.dlText", "Download as Text"), () => void downloadSpooledFile(f, "text"));
+    addItem(t("spool.act.print", "Print locally"), () => void printSpooledFile(f));
+    sep();
+    addItem(t("spool.act.hold", "Hold"), () => void spoolAction(f, "hold"));
+    addItem(t("spool.act.release", "Release"), () => void spoolAction(f, "release"));
+    addItem(t("spool.act.delete", "Delete"), () => void spoolAction(f, "delete"), true);
+    document.body.appendChild(menu);
+    contextMenuEl = menu;
+}
 
 async function refreshSpool(filters: SpoolFilters): Promise<void> {
     const app = App();
@@ -1361,12 +1604,7 @@ el<HTMLInputElement>("in-password").addEventListener("keydown", (ev: KeyboardEve
 
 // Saved-connections dropdown: explicit arrow button + popup list.
 // Right-clicking an item opens a context menu (Forget / Move to top).
-let contextMenuEl: HTMLDivElement | undefined;
-
-function closeContextMenu(): void {
-    contextMenuEl?.remove();
-    contextMenuEl = undefined;
-}
+// (contextMenuEl/closeContextMenu declared above — hoisted for spool menu)
 
 function showProfileContextMenu(p: ConnectionProfile, x: number, y: number): void {
     closeContextMenu();

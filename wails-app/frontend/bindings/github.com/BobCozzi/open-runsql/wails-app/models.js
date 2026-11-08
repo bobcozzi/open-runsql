@@ -516,6 +516,246 @@ export class RunRequest {
     }
 }
 
+export class SpooledFileActionRequest {
+    /**
+     * Creates a new SpooledFileActionRequest instance.
+     * @param {Partial<SpooledFileActionRequest>} [$$source = {}] - The source object to create the SpooledFileActionRequest.
+     */
+    constructor($$source = {}) {
+        if (!("connectionId" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["connectionId"] = "";
+        }
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("number" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["number"] = "";
+        }
+        if (!("jobName" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["jobName"] = "";
+        }
+        if (!("jobUser" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["jobUser"] = "";
+        }
+        if (!("jobNumber" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["jobNumber"] = "";
+        }
+        if (!("action" in $$source)) {
+            /**
+             * hold | release | delete
+             * @member
+             * @type {string}
+             */
+            this["action"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SpooledFileActionRequest instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {SpooledFileActionRequest}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SpooledFileActionRequest(/** @type {Partial<SpooledFileActionRequest>} */($$parsedSource));
+    }
+}
+
+export class SpooledFileActionResult {
+    /**
+     * Creates a new SpooledFileActionResult instance.
+     * @param {Partial<SpooledFileActionResult>} [$$source = {}] - The source object to create the SpooledFileActionResult.
+     */
+    constructor($$source = {}) {
+        if (!("ok" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["ok"] = false;
+        }
+        if (!("message" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["message"] = "";
+        }
+        if (!("elapsedMs" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["elapsedMs"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SpooledFileActionResult instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {SpooledFileActionResult}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SpooledFileActionResult(/** @type {Partial<SpooledFileActionResult>} */($$parsedSource));
+    }
+}
+
+export class SpooledFileDataRequest {
+    /**
+     * Creates a new SpooledFileDataRequest instance.
+     * @param {Partial<SpooledFileDataRequest>} [$$source = {}] - The source object to create the SpooledFileDataRequest.
+     */
+    constructor($$source = {}) {
+        if (!("connectionId" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["connectionId"] = "";
+        }
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("number" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["number"] = "";
+        }
+        if (!("jobName" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["jobName"] = "";
+        }
+        if (!("jobUser" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["jobUser"] = "";
+        }
+        if (!("jobNumber" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["jobNumber"] = "";
+        }
+        if (!("format" in $$source)) {
+            /**
+             * text | pdf
+             * @member
+             * @type {string}
+             */
+            this["format"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SpooledFileDataRequest instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {SpooledFileDataRequest}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SpooledFileDataRequest(/** @type {Partial<SpooledFileDataRequest>} */($$parsedSource));
+    }
+}
+
+export class SpooledFileDataResult {
+    /**
+     * Creates a new SpooledFileDataResult instance.
+     * @param {Partial<SpooledFileDataResult>} [$$source = {}] - The source object to create the SpooledFileDataResult.
+     */
+    constructor($$source = {}) {
+        if (!("kind" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["kind"] = "";
+        }
+        if (!("format" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["format"] = "";
+        }
+        if (!("bytes" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["bytes"] = 0;
+        }
+        if (!("base64" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["base64"] = "";
+        }
+        if (!("elapsedMs" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["elapsedMs"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SpooledFileDataResult instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {SpooledFileDataResult}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SpooledFileDataResult(/** @type {Partial<SpooledFileDataResult>} */($$parsedSource));
+    }
+}
+
 export class SpooledFileInfo {
     /**
      * Creates a new SpooledFileInfo instance.

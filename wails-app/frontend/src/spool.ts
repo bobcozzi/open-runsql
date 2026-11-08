@@ -107,6 +107,8 @@ export interface SpoolPaneOptions {
     onRefresh: (filters: SpoolFilters) => void;
     /** Stage 2 hook: double-click a row to open the viewer. */
     onRowOpen?: (file: SpooledFileInfo) => void;
+    /** Stage 2: right-click a row → select it and open the action menu. */
+    onRowContext?: (file: SpooledFileInfo, x: number, y: number) => void;
 }
 
 export interface SpoolPaneHandle {
@@ -285,8 +287,22 @@ export function createSpoolPane(opts: SpoolPaneOptions): SpoolPaneHandle {
             const actionsTd = document.createElement("td");
             actionsTd.className = "spool-actions";
             tr.appendChild(actionsTd);
-            // TODO(stage 2): open the spooled-file viewer (PDF/text) here.
             tr.addEventListener("dblclick", () => opts.onRowOpen?.(f));
+            const selectRow = () => {
+                tbody.querySelectorAll("tr.spool-selected").forEach((r) => r.classList.remove("spool-selected"));
+                tr.classList.add("spool-selected");
+            };
+            tr.addEventListener("click", selectRow);
+            tr.addEventListener("contextmenu", (ev) => {
+                if (!opts.onRowContext) return;
+                ev.preventDefault();
+                // Keep the document-level contextmenu closer from firing on
+                // this same event and immediately closing the menu we open.
+                ev.stopPropagation();
+                // Select the row so the action target is unambiguous.
+                selectRow();
+                opts.onRowContext(f, ev.clientX, ev.clientY);
+            });
             frag.appendChild(tr);
         });
         tbody.appendChild(frag);

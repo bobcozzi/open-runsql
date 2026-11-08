@@ -18,16 +18,31 @@ Read this + PROJECT_STATE.md first when resuming.
 - All suites green: Vitest 137/137, tsc clean, go build+vet clean, mvn compile clean.
 - Binary built 22:01 with everything below.
 - Branch v3-migration; remote origin = github.com/bobcozzi/open-runsql (private).
-- Uncommitted at sign-off: everything under `git status` (spooled files + late prompter work). Commit planned next session start.
+- Committed 2026-11-08 as 88769e5: spooled-files stage 1 + all prompter work below. Clean tree at sign-off.
 
 ## What landed tonight (latest first)
 
-### Spooled files — Stage 1 (NEW, untested live)
+### CL prompter — Choice text hints + inline ChoicePgmValues (2026-11-08)
+- Inline ChoicePgmValues (Choice="__PGM"): parsed in prompterModel into choicePgmValues; render in the datalist (advisory, Rstd=NO), deduped vs SpcVal/SngVal. ChoicePgmText@Text is the hint text for __PGM parms.
+- fieldHint = choiceHintText → rangeRelHint → constraintHint. choiceHintText builds the 5250-prompter string: type word (Choice attr) + SpcVal/SngVal special values, comma-joined, deduped against tokens already named in the Choice text, trailing "..." for a truncated tail. No type word → returns "" so range/rel hint shows.
+- QUAL-only parms render inline in a .prompter-qual-band (bordered+shaded, no fieldset legend); part 0 flush, parts 1+ indent. Parent SngVal/ChoicePgmValues scope to part 0 (whole-value slot); part 0 shows type word + parent's whole-value text (merged, deduped). Part 1+ show own Choice + own specials.
+- Keyword (KWD) always highlighted (--fg, semibold); focus flips to accent.
+- ELEM blocks keep the boxed group (parent owns composite).
+- Vitest 148/148, tsc clean, go build clean. Reference extension: /Users/cozzi/Downloads/projects/cozzi-cl-prompter/src/prompter.ts (buildConstraintHint at ~1100, wrapWithChoiceHint ~2581).
+
+### Spooled files — Stage 1 (committed 88769e5)
 - Java: `listSpooledFiles` op in Main.java (SpooledFileList on Session.clSystem; user/queue filters; per-field try/catch; ISO dates; kind:"spooledFiles").
-- Go: `ListSpooledFiles` in app.go (types SpooledFileRequest/Info/Result; follows GetCmdXml pattern). NOTE: subagent corrupted app.go during this (deleted helper block str/str2/boolVal/intVal/int64Val/normalizeNaming and mangled sqlMessageKind) — all restored from HEAD; duplicate ListSpooledFiles deduped. Files exist: wails-app/frontend/src/spool.ts + tests/spool.test.ts.
+- Go: `ListSpooledFiles` in app.go. Files exist: wails-app/frontend/src/spool.ts + tests/spool.test.ts.
 - Frontend: "Spooled Files" tab in work-tabs; filter row (User, All users, OutQ lib+name, All outqs, Refresh, Clear); sortable table (Name/Number/Job/User/Job#/UserData/OutQ LIB-NAME/Created/Pages/Size/Status/Hold); dblclick = TODO stub for viewer.
-- NOT DONE: viewer (PDF via PrintObjectTransformedInputStream), download, hold/release, move, delete — stages 2-5 in PROJECT_STATE.md.
-- Live-test it first tomorrow: filter combos, authority errors, big lists (no pagination yet — flagged in spec).
+- NOT DONE: viewer (PDF via PrintObjectTransformedInputStream), download, hold/release, move, delete. See Stage 2+ below.
+- Live-tested OK (filters work). No pagination yet.
+
+### Spooled files — Stage 2+ (NEXT)
+JT400 21.0.7 SpooledFile capabilities (verified via javap):
+- hold(String holdType), release(), delete(), move(OutputQueue), moveToTop(), copy()/copy(OutputQueue)
+- Text: getInputStream(PrintParameterList) → PrintObjectInputStream
+- PDF: getTransformedInputStream(PrintParameterList) → PrintObjectTransformedInputStream (needs PDF transform; requires host transform services)
+Planned actions: View (text in-app), Download as PDF, Download as TEXT, Hold, Release, Delete. Optionally Move/Move-to-top/Copy.
 
 ### CL prompter (after last commit 73821b3)
 - Defaults are real values (value=dft, not placeholder) — fixed ASPDEV required-bug; dataset.default records prefill.

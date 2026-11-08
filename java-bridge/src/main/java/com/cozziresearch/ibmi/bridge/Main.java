@@ -9,6 +9,9 @@ import com.ibm.as400.access.AS400Message;
 import com.ibm.as400.access.Command;
 import com.ibm.as400.access.CommandCall;
 import com.ibm.as400.access.PrintObject;
+import com.ibm.as400.access.PrintObjectPageInputStream;
+import com.ibm.as400.access.PrintObjectTransformedInputStream;
+import com.ibm.as400.access.PrintParameterList;
 import com.ibm.as400.access.SecureAS400;
 import com.ibm.as400.access.SpooledFile;
 import com.ibm.as400.access.SpooledFileList;
@@ -158,6 +161,18 @@ public final class Main {
                 out.set("result", listSpooledFiles(s,
                         text(r, "outqLib", ""), text(r, "outq", ""), text(r, "user", ""),
                         r.path("allUsers").asBoolean(false), r.path("allOutqs").asBoolean(false)));
+            }
+            case "spooledFileAction" -> {
+                Session s = session(r);
+                out.set("result", spooledFileAction(s, required(r, "action"),
+                        required(r, "name"), required(r, "number"), required(r, "jobName"),
+                        required(r, "jobUser"), required(r, "jobNumber")));
+            }
+            case "getSpooledFileData" -> {
+                Session s = session(r);
+                out.set("result", getSpooledFileData(s, text(r, "format", "text"),
+                        required(r, "name"), required(r, "number"), required(r, "jobName"),
+                        required(r, "jobUser"), required(r, "jobNumber")));
             }
             case "commit" -> { Session s = session(r); s.lock.lock(); try { s.connection.commit(); } finally { s.lock.unlock(); } }
             case "rollback" -> { Session s = session(r); s.lock.lock(); try { s.connection.rollback(); } finally { s.lock.unlock(); } }
@@ -388,6 +403,113 @@ public final class Main {
         ObjectNode result = JSON.createObjectNode();
         result.put("kind", "spooledFiles");
         result.set("files", files);
+        result.put("elapsedMs", elapsedMs(started));
+        return result;
+    }
+
+    /** Locate one spooled file by identity (name/number/job triple). The list
+        is filtered by job user to keep the scan small. The returned file's
+        handle is valid only while `list` stays open — callers must keep the
+        list referenced until the action/read completes. */
+    private static SpooledFile findSpooledFile(SpooledFileList list, String name, String number,
+            String jobName, String jobUser, String jobNumber) throws Exception {
+        list.openSynchronously();
+        Enumeration<SpooledFile> e = list.getObjects();
+        while (e.hasMoreElements()) {
+            SpooledFile f = e.nextElement();
+            if (eqAttr(splfStr(f::getName), name) && eqAttr(splfStr(f::getNumber), number)
+                    && eqAttr(splfStr(f::getJobName), jobName) && eqAttr(splfStr(f::getJobUser), jobUser)
+                    && eqAttr(splfStr(f::getJobNumber), jobNumber)) {
+                return f;
+            }
+        }
+        return null;
+    }
+
+    private static SpooledFileList newListForUser(AS400 sys, String jobUser) throws Exception {
+        SpooledFileList list = new SpooledFileList(sys);
+        list.setUserFilter(jobUser == null || jobUser.isBlank() ? "*CURRENT"
+                : jobUser.trim().toUpperCase(Locale.ROOT));
+        return list;
+    }
+
+    private static boolean eqAttr(String a, String b) {
+        return a.trim().equalsIgnoreCase(b == null ? "" : b.trim());
+    }
+
+    /** hold/release/delete on one spooled file. */
+    private static ObjectNode spooledFileAction(Session s, String action, String name,
+            String number, String jobName, String jobUser, String jobNumber) throws Exception {
+        long started = System.nanoTime();
+        SpooledFileList list = newListForUser(s.clSystem, jobUser);
+        ObjectNode result = JSON.createObjectNode();
+        try {
+            SpooledFile f = findSpooledFile(list, name, number, jobName, jobUser, jobNumber);
+            if (f == null) {
+                result.put("ok", false);
+                result.put("message", "Spooled file not found: " + name);
+            } else {
+                switch (action.toLowerCase(Locale.ROOT)) {
+                    case "hold" -> f.hold("*IMMED");
+                    case "release" -> f.release();
+                    case "delete" -> f.delete();
+                    default -> throw new IllegalArgumentException("Unknown spooled-file action: " + action);
+                }
+                result.put("ok", true);
+                result.put("message", action + " " + name + " completed");
+            }
+        } finally {
+            try { list.close(); } catch (Exception ignored) {}
+        }
+        result.put("elapsedMs", elapsedMs(started));
+        return result;
+    }
+
+    /** Read a spooled file's content: raw text bytes or PDF transform,
+        base64-encoded for the JSON-lines protocol. */
+    private static ObjectNode getSpooledFileData(Session s, String format, String name,
+            String number, String jobName, String jobUser, String jobNumber) throws Exception {
+        long started = System.nanoTime();
+        SpooledFileList list = newListForUser(s.clSystem, jobUser);
+        byte[] bytes;
+        try {
+            SpooledFile f = findSpooledFile(list, name, number, jobName, jobUser, jobNumber);
+            if (f == null) throw new IllegalStateException("Spooled file not found: " + name);
+            if ("pdf".equalsIgnoreCase(format)) {
+                // PDF via host print transform: *WSCST + the default customization
+                // object. Requires the host transform services; if the result isn't
+                // %PDF the frontend shows the transform error instead of a file.
+                PrintParameterList p = new PrintParameterList();
+                p.setParameter(PrintObject.ATTR_MFGTYPE, "*WSCST");
+                p.setParameter(PrintObject.ATTR_WORKSTATION_CUST_OBJECT, "/QSYS.LIB/QWPDEFAULT.WSCST");
+                try (PrintObjectTransformedInputStream in = f.getTransformedInputStream(p)) {
+                    bytes = in.readAllBytes();
+                }
+            } else {
+                // The page stream is already ASCII/UTF-8 text with raw SCS
+                // control bytes. Decode byte-for-byte (ISO-8859-1 identity) so
+                // control bytes (0x94 framing, column bytes) survive unchanged
+                // for the frontend SCS renderer. No CCSID conversion here.
+                StringBuilder sb = new StringBuilder();
+                try (PrintObjectPageInputStream in = f.getPageInputStream(new PrintParameterList())) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    do {
+                        while ((n = in.read(buf)) > 0) {
+                            sb.append(new String(buf, 0, n, StandardCharsets.ISO_8859_1));
+                        }
+                    } while (in.nextPage());
+                }
+                bytes = sb.toString().getBytes(StandardCharsets.UTF_8);
+            }
+        } finally {
+            try { list.close(); } catch (Exception ignored) {}
+        }
+        ObjectNode result = JSON.createObjectNode();
+        result.put("kind", "spooledFileData");
+        result.put("format", format);
+        result.put("bytes", bytes.length);
+        result.put("base64", Base64.getEncoder().encodeToString(bytes));
         result.put("elapsedMs", elapsedMs(started));
         return result;
     }

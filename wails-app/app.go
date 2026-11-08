@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -154,6 +156,40 @@ type SpooledFileResult struct {
 	Kind      string            `json:"kind"`
 	Files     []SpooledFileInfo `json:"files"`
 	ElapsedMs int64             `json:"elapsedMs"`
+}
+
+// SpooledFileTarget identifies one spooled file by its name/number/job triple.
+type SpooledFileTarget struct {
+	ConnectionID string `json:"connectionId"`
+	Name         string `json:"name"`
+	Number       string `json:"number"`
+	JobName      string `json:"jobName"`
+	JobUser      string `json:"jobUser"`
+	JobNumber    string `json:"jobNumber"`
+}
+
+type SpooledFileActionRequest struct {
+	SpooledFileTarget
+	Action string `json:"action"` // hold | release | delete
+}
+
+type SpooledFileDataRequest struct {
+	SpooledFileTarget
+	Format string `json:"format"` // text | pdf
+}
+
+type SpooledFileActionResult struct {
+	OK        bool   `json:"ok"`
+	Message   string `json:"message"`
+	ElapsedMs int64  `json:"elapsedMs"`
+}
+
+type SpooledFileDataResult struct {
+	Kind      string `json:"kind"`
+	Format    string `json:"format"`
+	Bytes     int64  `json:"bytes"`
+	Base64    string `json:"base64"`
+	ElapsedMs int64  `json:"elapsedMs"`
 }
 
 // ConnectionProfile is a saved connection. Password is stored base64-obscured
@@ -737,6 +773,117 @@ func (a *App) ListSpooledFiles(req SpooledFileRequest) (*SpooledFileResult, erro
 		}
 	}
 	return result, nil
+}
+
+// spoolTargetParams maps a SpooledFileTarget to bridge call params.
+func spoolTargetParams(t SpooledFileTarget) map[string]any {
+	return map[string]any{
+		"connectionId": t.ConnectionID, "name": t.Name, "number": t.Number,
+		"jobName": t.JobName, "jobUser": t.JobUser, "jobNumber": t.JobNumber,
+	}
+}
+
+// SpooledFileAction runs hold/release/delete on one spooled file.
+func (a *App) SpooledFileAction(req SpooledFileActionRequest) (*SpooledFileActionResult, error) {
+	a.mu.Lock()
+	c := a.client
+	_, known := a.connections[req.ConnectionID]
+	a.mu.Unlock()
+	if c == nil || !known {
+		return nil, errors.New("not connected")
+	}
+	params := spoolTargetParams(req.SpooledFileTarget)
+	params["action"] = strings.TrimSpace(req.Action)
+	resp, err := c.Call("spooledFileAction", params)
+	if err != nil {
+		return nil, err
+	}
+	raw, _ := resp["result"].(map[string]any)
+	return &SpooledFileActionResult{
+		OK: boolVal(raw["ok"]), Message: str2(raw, "message"), ElapsedMs: int64Val(raw["elapsedMs"]),
+	}, nil
+}
+
+// GetSpooledFileData reads a spooled file's content (text or PDF transform),
+// base64-encoded.
+func (a *App) GetSpooledFileData(req SpooledFileDataRequest) (*SpooledFileDataResult, error) {
+	a.mu.Lock()
+	c := a.client
+	_, known := a.connections[req.ConnectionID]
+	a.mu.Unlock()
+	if c == nil || !known {
+		return nil, errors.New("not connected")
+	}
+	params := spoolTargetParams(req.SpooledFileTarget)
+	params["format"] = strings.TrimSpace(req.Format)
+	resp, err := c.Call("getSpooledFileData", params)
+	if err != nil {
+		return nil, err
+	}
+	raw, _ := resp["result"].(map[string]any)
+	return &SpooledFileDataResult{
+		Kind: str2(raw, "kind"), Format: str2(raw, "format"), Bytes: int64Val(raw["bytes"]),
+		Base64: str2(raw, "base64"), ElapsedMs: int64Val(raw["elapsedMs"]),
+	}, nil
+}
+
+// SaveSpooledFile writes base64 content to ~/Downloads/<filename>, returning
+// the saved path. Filenames are sanitized to a safe basename.
+func (a *App) SaveSpooledFile(filename, base64Data string) (string, error) {
+	base := filepath.Base(strings.TrimSpace(filename))
+	if base == "" || base == "." {
+		return "", errors.New("filename is required")
+	}
+	raw, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		return "", fmt.Errorf("decode: %w", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	out := filepath.Join(home, "Downloads", base)
+	if err := os.WriteFile(out, raw, 0o600); err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+// PrintSpooledFile saves the PDF bytes to a temp file and opens it with the OS
+// default handler, which surfaces the print dialog for a PDF on macOS.
+func (a *App) PrintSpooledFile(filename, base64Data string) (string, error) {
+	base := filepath.Base(strings.TrimSpace(filename))
+	if base == "" || base == "." {
+		base = "spooled-file.pdf"
+	}
+	if !strings.HasSuffix(strings.ToLower(base), ".pdf") {
+		base += ".pdf"
+	}
+	raw, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		return "", fmt.Errorf("decode: %w", err)
+	}
+	tmp := filepath.Join(os.TempDir(), base)
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return "", err
+	}
+	// `open` hands the PDF to the OS; Preview's print flow gives the dialog.
+	cmd := exec.Command("open", tmp)
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+	return tmp, nil
+}
+
+// OpenSpooledFile opens a previously saved spooled-file download with the OS
+// default handler so the user can view it.
+func (a *App) OpenSpooledFile(path string) error {
+	p := strings.TrimSpace(path)
+	if p == "" {
+		return errors.New("path is required")
+	}
+	cmd := exec.Command("open", p)
+	return cmd.Start()
 }
 
 // classifyCLMessage ports commandEntryModel.ts classifyMessage(). Severity is

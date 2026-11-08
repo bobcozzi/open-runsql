@@ -99,13 +99,25 @@ export function GetCmdXml(req) {
 }
 
 /**
+ * GetSpooledFileData reads a spooled file's content (text or PDF transform),
+ * base64-encoded.
+ * @param {$models.SpooledFileDataRequest} req
+ * @returns {$CancellablePromise<$models.SpooledFileDataResult | null>}
+ */
+export function GetSpooledFileData(req) {
+    return $Call.ByID(817362709, req).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType7($result);
+    }));
+}
+
+/**
  * GetWorkspace returns the workspace state for a connection (window boot).
  * @param {string} connectionID
  * @returns {$CancellablePromise<$models.WorkspaceState>}
  */
 export function GetWorkspace(connectionID) {
     return $Call.ByID(597689140, connectionID).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType6($result);
+        return $$createType8($result);
     }));
 }
 
@@ -115,7 +127,7 @@ export function GetWorkspace(connectionID) {
  */
 export function ListConnectionProfiles() {
     return $Call.ByID(1735721671).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType8($result);
+        return $$createType10($result);
     }));
 }
 
@@ -125,7 +137,7 @@ export function ListConnectionProfiles() {
  */
 export function ListDetached() {
     return $Call.ByID(521395759).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType9($result);
+        return $$createType11($result);
     }));
 }
 
@@ -137,7 +149,7 @@ export function ListDetached() {
  */
 export function ListSpooledFiles(req) {
     return $Call.ByID(2924065984, req).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType11($result);
+        return $$createType13($result);
     }));
 }
 
@@ -147,7 +159,7 @@ export function ListSpooledFiles(req) {
  */
 export function ListWorkspaces() {
     return $Call.ByID(1856021707).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType12($result);
+        return $$createType14($result);
     }));
 }
 
@@ -158,6 +170,27 @@ export function ListWorkspaces() {
  */
 export function MoveConnectionProfileToTop(name) {
     return $Call.ByID(2667213443, name);
+}
+
+/**
+ * OpenSpooledFile opens a previously saved spooled-file download with the OS
+ * default handler so the user can view it.
+ * @param {string} path
+ * @returns {$CancellablePromise<void>}
+ */
+export function OpenSpooledFile(path) {
+    return $Call.ByID(951426811, path);
+}
+
+/**
+ * PrintSpooledFile saves the PDF bytes to a temp file and opens it with the OS
+ * default handler, which surfaces the print dialog for a PDF on macOS.
+ * @param {string} filename
+ * @param {string} base64Data
+ * @returns {$CancellablePromise<string>}
+ */
+export function PrintSpooledFile(filename, base64Data) {
+    return $Call.ByID(1651358744, filename, base64Data);
 }
 
 /**
@@ -177,6 +210,28 @@ export function Run(req) {
  */
 export function SaveConnectionProfile(p) {
     return $Call.ByID(3622685069, p);
+}
+
+/**
+ * SaveSpooledFile writes base64 content to ~/Downloads/<filename>, returning
+ * the saved path. Filenames are sanitized to a safe basename.
+ * @param {string} filename
+ * @param {string} base64Data
+ * @returns {$CancellablePromise<string>}
+ */
+export function SaveSpooledFile(filename, base64Data) {
+    return $Call.ByID(3099208264, filename, base64Data);
+}
+
+/**
+ * SpooledFileAction runs hold/release/delete on one spooled file.
+ * @param {$models.SpooledFileActionRequest} req
+ * @returns {$CancellablePromise<$models.SpooledFileActionResult | null>}
+ */
+export function SpooledFileAction(req) {
+    return $Call.ByID(187847301, req).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType16($result);
+    }));
 }
 
 /**
@@ -224,10 +279,14 @@ const $$createType2 = $models.SqlResult.createFrom;
 const $$createType3 = $Create.Nullable($$createType2);
 const $$createType4 = $models.CmdXmlResult.createFrom;
 const $$createType5 = $Create.Nullable($$createType4);
-const $$createType6 = $models.WorkspaceState.createFrom;
-const $$createType7 = $models.ConnectionProfile.createFrom;
-const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = $Create.Array($Create.Any);
-const $$createType10 = $models.SpooledFileResult.createFrom;
-const $$createType11 = $Create.Nullable($$createType10);
-const $$createType12 = $Create.Array($$createType6);
+const $$createType6 = $models.SpooledFileDataResult.createFrom;
+const $$createType7 = $Create.Nullable($$createType6);
+const $$createType8 = $models.WorkspaceState.createFrom;
+const $$createType9 = $models.ConnectionProfile.createFrom;
+const $$createType10 = $Create.Array($$createType9);
+const $$createType11 = $Create.Array($Create.Any);
+const $$createType12 = $models.SpooledFileResult.createFrom;
+const $$createType13 = $Create.Nullable($$createType12);
+const $$createType14 = $Create.Array($$createType8);
+const $$createType15 = $models.SpooledFileActionResult.createFrom;
+const $$createType16 = $Create.Nullable($$createType15);
