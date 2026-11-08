@@ -210,10 +210,34 @@ export function renderSpoolText(raw: string): { lines: string[]; pageCount: numb
 export function textToPdfBase64(text: string): string {
     const { lines } = renderSpoolText(text);
     const clean = lines.filter((l) => l !== "\f");
-    const perPage = 54; // ~66-line page minus margins
+    // Classic SCS output is 132 columns; switch to landscape when any line is
+    // wider than an 80-col portrait page fits. Courier 9pt char width ~5.4pt.
+    const maxLen = clean.reduce((m, l) => Math.max(m, l.length), 0);
+    const landscape = maxLen > 80;
+    const pageW = landscape ? 792 : 612;
+    const pageH = landscape ? 612 : 792;
+    const marginX = 40;
+    // Fit the longest line: shrink font if needed so it never truncates.
+    const charW = 0.6; // Courier advance = 0.6 * fontSize
+    let fontSize = 9;
+    const usable = pageW - marginX * 2;
+    if (maxLen > 0) {
+        const fit = usable / (maxLen * charW);
+        if (fit < fontSize) fontSize = Math.max(5, Math.floor(fit * 10) / 10);
+    }
+    const lineHeight = fontSize;
+    const startY = pageH - 28;
+    const perPage = Math.max(1, Math.floor((startY - 14) / lineHeight));
+    // Honor the spooled file's own page ejects: renderSpoolText splits on \f
+    // but flattens, so re-derive page boundaries from the raw text. Within a
+    // page, wrap to additional PDF pages only if it overflows perPage lines.
+    const rawPages = text.split("\f");
     const pages: string[] = [];
-    for (let i = 0; i < clean.length; i += perPage) {
-        pages.push(clean.slice(i, i + perPage).join("\n"));
+    for (const rp of rawPages) {
+        const pageLines = renderSpoolText(rp).lines.filter((l) => l !== "\f");
+        for (let i = 0; i < pageLines.length; i += perPage) {
+            pages.push(pageLines.slice(i, i + perPage).join("\n"));
+        }
     }
     if (pages.length === 0) pages.push("");
 
@@ -228,8 +252,8 @@ export function textToPdfBase64(text: string): string {
     pages.forEach((pg, i) => {
         const pageObj = 4 + i * 2;
         const contentObj = pageObj + 1;
-        objects[pageObj - 1] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObj} 0 R >>`;
-        let stream = "BT /F1 9 Tf 40 750 Td 11 TL\n";
+        objects[pageObj - 1] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObj} 0 R >>`;
+        let stream = `BT /F1 ${fontSize} Tf ${marginX} ${startY} Td ${lineHeight} TL\n`;
         for (const ln of pg.split("\n")) stream += `(${esc(ln)}) Tj T*\n`;
         stream += "ET";
         objects[contentObj - 1] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
@@ -1519,6 +1543,7 @@ async function doPrompt(): Promise<void> {
 
 els.btnConnect.addEventListener("click", () => void doConnect());
 els.btnDisconnect.addEventListener("click", () => void doDisconnect());
+document.getElementById("btn-go")?.addEventListener("click", () => void doConnect());
 els.btnRun.addEventListener("click", () => void doRun());
 els.btnRunAll.addEventListener("click", () => void doRunAll());
 els.btnRunFrom.addEventListener("click", () => void doRunFromSelected());
@@ -1598,6 +1623,14 @@ els.sqlInput.addEventListener("input", () => {
 
 el<HTMLInputElement>("in-password").addEventListener("keydown", (ev: KeyboardEvent) => {
     if (ev.key === "Enter") void doConnect();
+});
+
+// Disable the quick-connect GO button once the user edits the form manually.
+["in-host", "in-user", "in-password"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("input", () => {
+        const go = document.getElementById("btn-go") as HTMLButtonElement | null;
+        if (go) go.disabled = true;
+    });
 });
 
 // Saved-connections dropdown: explicit arrow button + popup list.
@@ -1686,6 +1719,9 @@ function toggleSavedHosts(): void {
         item.addEventListener("click", () => {
             fillFormFromProfile(p);
             popup.hidden = true;
+            // Enable the quick-connect GO button for the selected profile.
+            const go = document.getElementById("btn-go") as HTMLButtonElement | null;
+            if (go) go.disabled = false;
         });
         popup.appendChild(item);
     };

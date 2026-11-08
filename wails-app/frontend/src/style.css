@@ -164,6 +164,22 @@ body {
     border-color: var(--accent);
 }
 
+.btn-go {
+    background: #1a7f37;
+    border-color: #1a7f37;
+    color: #fff;
+    font-weight: 700;
+    padding: 4px 18px;
+    justify-self: start;
+    align-self: center;
+    width: auto;
+}
+
+.btn-go:hover:not(:disabled) {
+    background: #20944a;
+    border-color: #20944a;
+}
+
 .icon-btn {
     display: inline-flex;
     align-items: center;
