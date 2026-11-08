@@ -486,17 +486,28 @@ public final class Main {
                     bytes = in.readAllBytes();
                 }
             } else {
-                // The page stream is already ASCII/UTF-8 text with raw SCS
-                // control bytes. Decode byte-for-byte (ISO-8859-1 identity) so
-                // control bytes (0x94 framing, column bytes) survive unchanged
-                // for the frontend SCS renderer. No CCSID conversion here.
+                // Page stream: decoded text + per-record SCS column framing.
+                // Decode with the spooled file's job CCSID (EBCDIC 037 etc.)
+                // so text is readable; the {column} framing survives for the
+                // frontend renderer.
+                int ccsid = 37;
+                try {
+                    Object c = f.getIntegerAttribute(PrintObject.ATTR_JOBCCSID);
+                    if (c instanceof Number n && n.intValue() > 0) ccsid = n.intValue();
+                } catch (Throwable ignored) {}
+                java.nio.charset.Charset cs;
+                try {
+                    cs = java.nio.charset.Charset.forName("Cp0" + ccsid);
+                } catch (Throwable t) {
+                    cs = java.nio.charset.Charset.forName("Cp037");
+                }
                 StringBuilder sb = new StringBuilder();
                 try (PrintObjectPageInputStream in = f.getPageInputStream(new PrintParameterList())) {
                     byte[] buf = new byte[8192];
                     int n;
                     do {
                         while ((n = in.read(buf)) > 0) {
-                            sb.append(new String(buf, 0, n, StandardCharsets.ISO_8859_1));
+                            sb.append(new String(buf, 0, n, cs));
                         }
                     } while (in.nextPage());
                 }

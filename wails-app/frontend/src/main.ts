@@ -165,15 +165,16 @@ function b64ToText(b64: string): string {
 }
 
 /** Render the JT400 page stream to clean display text. Each record arrives
- * as "\u0000\u0094{" + one SCS column/line-control byte + text; records are
- * separated by "\u0000\n". The SCS byte is a column tab when > 0x20 (pad to
- * column) or a line-control otherwise. Framing is compared as character codes
- * on the decoded string. Returns { lines, pageCount }. */
+ * as "\u0000\u0094{" + one column byte + text; records are separated by
+ * "\u0000\n" and pages by "\f". The column byte is the 1-based target column
+ * (high-bit bytes are the stream's offset form: byte-106). Column moves pad
+ * with blanks; pure-positioning segments are dropped. Returns { lines,
+ * pageCount }. */
 export function renderSpoolText(raw: string): { lines: string[]; pageCount: number } {
     const lines: string[] = [];
     for (const page of raw.split("\f")) {
-        // Page-start PRTCTL: \u0094 0x44 0x01 (Set Mode) — only strip that
-        // exact triple; a bare \u0094 elsewhere is a high-column SCS byte.
+        // Page-start PRTCTL Set Mode triple (\u0094 0x44 0x01); a bare \u0094
+        // elsewhere is a high-column byte, so strip only that exact triple.
         const cleaned = page.replace(/\u0094\x44\x01/g, "");
         let first = true;
         for (const rec of cleaned.split("\u0000\n")) {
@@ -185,16 +186,10 @@ export function renderSpoolText(raw: string): { lines: string[]; pageCount: numb
                 const scs = seg.charCodeAt(0);
                 let text = seg.slice(1);
                 // A "column" byte that is an ASCII letter is report text
-                // (the framing byte was dropped by the page stream) — put it
-                // back. Real column bytes are control chars or punctuation.
-                if (scs >= 0x41 && scs <= 0x7A && text) {
-                    text = seg;
-                }
+                // (framing byte dropped by the page stream) — put it back.
+                if (scs >= 0x41 && scs <= 0x7A && text) text = seg;
                 text = text.replace(/[\u0000-\u001F\u0080-\u009F]/g, "");
                 if (!text) continue;          // pure positioning segment
-                // Byte after the record marker = absolute 1-based column.
-                // High-bit bytes are the stream's EBCDIC column form: byte-108
-                // (verified against the report layout). Low bytes are direct.
                 const col = scs >= 0x80 ? scs - 106 : scs - 1;
                 if (col > cur.length && col <= 120) {
                     cur += " ".repeat(col - cur.length);
@@ -214,10 +209,11 @@ export function renderSpoolText(raw: string): { lines: string[]; pageCount: numb
  * base64. No host print transform needed. */
 export function textToPdfBase64(text: string): string {
     const { lines } = renderSpoolText(text);
+    const clean = lines.filter((l) => l !== "\f");
     const perPage = 54; // ~66-line page minus margins
     const pages: string[] = [];
-    for (let i = 0; i < lines.length; i += perPage) {
-        pages.push(lines.slice(i, i + perPage).join("\n"));
+    for (let i = 0; i < clean.length; i += perPage) {
+        pages.push(clean.slice(i, i + perPage).join("\n"));
     }
     if (pages.length === 0) pages.push("");
 
@@ -279,7 +275,8 @@ async function viewSpooledFile(f: SpooledFileInfo): Promise<void> {
         const pre = document.createElement("pre");
         pre.className = "spool-viewer-content";
         // Clean SCS control bytes; keep line spacing and page breaks visible.
-        pre.textContent = renderSpoolText(b64ToText(res.base64 ?? "")).lines.join("\n");
+        pre.textContent = renderSpoolText(b64ToText(res.base64 ?? "")).lines
+            .map((l) => (l === "\f" ? "\n" : l)).join("\n");
         box.appendChild(head);
         box.appendChild(pre);
         overlay.appendChild(box);
@@ -310,7 +307,8 @@ async function downloadSpooledFile(f: SpooledFileInfo, format: "pdf" | "text"): 
             // Text download: same cleaned rendering the viewer shows, then
             // re-encode as base64 for the Go save routine.
             const res = await app.GetSpooledFileData({ ...target, format });
-            const text = renderSpoolText(b64ToText(res.base64 ?? "")).lines.join("\n");
+            const text = renderSpoolText(b64ToText(res.base64 ?? "")).lines
+                .map((l) => (l === "\f" ? "" : l)).join("\n");
             base64 = btoa(unescape(encodeURIComponent(text)));
         }
         const saved = await app.SaveSpooledFile(`${f.name.trim()}_${f.jobNumber.trim()}.${format === "pdf" ? "pdf" : "txt"}`, base64);
