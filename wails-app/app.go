@@ -122,6 +122,40 @@ type CmdXmlResult struct {
 	ElapsedMs int64  `json:"elapsedMs"`
 }
 
+// Spooled Files (stage 1: list + filter).
+
+type SpooledFileRequest struct {
+	ConnectionID string `json:"connectionId"`
+	OutqLib      string `json:"outqLib,omitempty"`
+	Outq         string `json:"outq,omitempty"`
+	User         string `json:"user,omitempty"`
+	AllUsers     bool   `json:"allUsers,omitempty"`
+	AllOutqs     bool   `json:"allOutqs,omitempty"`
+}
+
+type SpooledFileInfo struct {
+	Name       string `json:"name"`
+	Number     string `json:"number"`
+	JobName    string `json:"jobName"`
+	JobUser    string `json:"jobUser"`
+	JobNumber  string `json:"jobNumber"`
+	UserData   string `json:"userData"`
+	OutqName   string `json:"outqName"`
+	OutqLib    string `json:"outqLib"`
+	CreateDate string `json:"createDate"`
+	CreateTime string `json:"createTime"`
+	Pages      int64  `json:"pages"`
+	Size       int64  `json:"size"`
+	Status     string `json:"status"`
+	HoldStatus string `json:"holdStatus"`
+}
+
+type SpooledFileResult struct {
+	Kind      string            `json:"kind"`
+	Files     []SpooledFileInfo `json:"files"`
+	ElapsedMs int64             `json:"elapsedMs"`
+}
+
 // ConnectionProfile is a saved connection. Password is stored base64-obscured
 // only when the user opted in via the "Save password" checkbox — this is
 // obscurity, not encryption, for trusted/limited-access environments.
@@ -665,6 +699,44 @@ func (a *App) GetCmdXml(req GetCmdXmlRequest) (*CmdXmlResult, error) {
 	}
 	raw, _ := resp["result"].(map[string]any)
 	return &CmdXmlResult{XML: str2(raw, "xml"), Bytes: intVal(raw["bytes"]), ElapsedMs: int64Val(raw["elapsedMs"])}, nil
+}
+
+// ListSpooledFiles lists spooled files on the connection, filtered by user
+// and/or output queue (blank user = *CURRENT; allUsers/allOutqs widen scope).
+func (a *App) ListSpooledFiles(req SpooledFileRequest) (*SpooledFileResult, error) {
+	a.mu.Lock()
+	c := a.client
+	_, known := a.connections[req.ConnectionID]
+	a.mu.Unlock()
+	if c == nil || !known {
+		return nil, errors.New("not connected")
+	}
+	resp, err := c.Call("listSpooledFiles", map[string]any{
+		"connectionId": req.ConnectionID,
+		"outqLib":      strings.TrimSpace(req.OutqLib),
+		"outq":         strings.TrimSpace(req.Outq),
+		"user":         strings.TrimSpace(req.User),
+		"allUsers":     req.AllUsers,
+		"allOutqs":     req.AllOutqs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	raw, _ := resp["result"].(map[string]any)
+	result := &SpooledFileResult{Kind: str2(raw, "kind"), ElapsedMs: int64Val(raw["elapsedMs"])}
+	for _, f := range anySlice(raw["files"]) {
+		if fm, ok := f.(map[string]any); ok {
+			result.Files = append(result.Files, SpooledFileInfo{
+				Name: str2(fm, "name"), Number: str2(fm, "number"),
+				JobName: str2(fm, "jobName"), JobUser: str2(fm, "jobUser"), JobNumber: str2(fm, "jobNumber"),
+				UserData: str2(fm, "userData"), OutqName: str2(fm, "outqName"), OutqLib: str2(fm, "outqLib"),
+				CreateDate: str2(fm, "createDate"), CreateTime: str2(fm, "createTime"),
+				Pages: int64Val(fm["pages"]), Size: int64Val(fm["size"]),
+				Status: str2(fm, "status"), HoldStatus: str2(fm, "holdStatus"),
+			})
+		}
+	}
+	return result, nil
 }
 
 // classifyCLMessage ports commandEntryModel.ts classifyMessage(). Severity is

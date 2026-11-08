@@ -19,8 +19,10 @@ import {
     type SqlResult,
 } from "./types";
 import { splitStatements, statementAt, statementsFrom } from "./statements";
+import { arrowRecallDirection, InputHistoryStore } from "./inputHistory";
 import { parseCmdXml } from "./clprompter/prompterModel";
 import { showPrompter } from "./clprompter/prompterView";
+import { buildSpooledFileRequest, createSpoolPane, type SpoolFilters } from "./spool";
 import { t } from "./l10n";
 
 function el<T extends HTMLElement>(id: string): T {
@@ -88,6 +90,7 @@ function applyL10nToStaticDom(): void {
     setTitle("splitter", t("html.splitterTitle", "Drag to resize"));
     setText("btn-load-more", t("html.loadMore", "Load more"));
     setText("btn-load-all", t("html.loadAll", "Load all"));
+    setText("work-tab-spool", t("spool.tab", "Spooled Files"));
 }
 applyL10nToStaticDom();
 
@@ -135,9 +138,55 @@ function showPane(name: string): void {
     els.emptyState.hidden = anyVisible;
 }
 
+// --- Spooled Files pane (stage 1: list + filter + sort) ---
+// Static "spool" work-pane; the tab lives in index.html next to Results.
+// loadedFor tracks which connection the visible list came from so switching
+// connection tabs and coming back re-fetches instead of showing stale files.
+const spoolState = { loadedFor: "" };
+const spool = createSpoolPane({
+    onRefresh: (filters) => void refreshSpool(filters),
+    // Stage 2: onRowOpen -> spooled-file viewer (PDF/text).
+});
+els.workArea.appendChild(spool.root);
+
+async function refreshSpool(filters: SpoolFilters): Promise<void> {
+    const app = App();
+    const connectionId = activeTab()?.connectionId ?? "";
+    if (!app || !connectionId) {
+        showMessages([], t("spool.notConnected", "Connect to an IBM i to list spooled files."));
+        return;
+    }
+    spool.setBusy(true);
+    const started = performance.now();
+    appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logList", "List Spooled Files...")}`, "msg-action");
+    try {
+        const result = await app.ListSpooledFiles(buildSpooledFileRequest(connectionId, filters));
+        const count = result.files?.length ?? 0;
+        spool.setFiles(result.files ?? []);
+        spoolState.loadedFor = connectionId;
+        appendLogLine(t("spool.logListed", "Listed {count} spooled file(s)   ({ms} ms)")
+            .replace("{count}", String(count)).replace("{ms}", String(result.elapsedMs)), "msg-info", true);
+        els.statusText.textContent = t("spool.statusCount", "{count} spooled file(s) in {ms} ms")
+            .replace("{count}", String(count)).replace("{ms}", String(result.elapsedMs));
+    } catch (err) {
+        const elapsed = Math.round(performance.now() - started);
+        appendLogLine(t("spool.logFailed", "List spooled files failed   ({ms} ms)").replace("{ms}", String(elapsed)), "msg-error", true);
+        showMessages([], String((err as Error)?.message ?? err));
+    } finally {
+        spool.setBusy(false);
+    }
+}
+
 els.workTabs.addEventListener("click", (ev) => {
     const tab = (ev.target as HTMLElement).closest<HTMLElement>(".work-tab");
-    if (tab?.dataset.pane) showPane(tab.dataset.pane);
+    if (tab?.dataset.pane) {
+        showPane(tab.dataset.pane);
+        // Spooled Files: load on first open; reload when the visible
+        // connection changed since the list was last fetched.
+        if (tab.dataset.pane === "spool" && spoolState.loadedFor !== (activeTab()?.connectionId ?? "")) {
+            void refreshSpool(spool.filters());
+        }
+    }
 });
 
 function openPrompterPane(label: string): { pane: HTMLElement; close: () => void; paneName: string } {
@@ -232,6 +281,10 @@ const state: AppState = {
 const tabs: ConnectionTab[] = [];
 let activeTabKey = "";
 let tabCounter = 0;
+
+// Per-connection statement history for editor recall (F9/F8, ArrowUp/ArrowDown).
+// In-memory per session; keyed by the active tab's connectionId.
+const inputHistories = new InputHistoryStore();
 
 function activeTab(): ConnectionTab | undefined {
     return tabs.find((t) => t.key === activeTabKey);
@@ -938,6 +991,7 @@ async function doDisconnect(): Promise<void> {
 async function runOne(text: string, actionLabel = t("main.logRunSelected", "Run Selected...")): Promise<void> {
     const app = App();
     if (!app || !activeTab()?.connectionId) return;
+    inputHistories.for(activeTab()?.connectionId).push(text);
     state.sortCol = -1;
     state.sortDir = 1;
     state.columns = [];
@@ -948,7 +1002,9 @@ async function runOne(text: string, actionLabel = t("main.logRunSelected", "Run 
     els.resultBody.innerHTML = "";
     els.btnLoadMore.hidden = true;
     els.btnLoadAll.hidden = true;
-    showPane("results");
+    // CL commands have no result set — their output is the Messages pane
+    // (action log + CPF/CPC messages). SQL stays on Results.
+    showPane(/^\s*CL\s*:/i.test(text) ? "messages" : "results");
     const started = performance.now();
     try {
         const result = await app.Run({
@@ -1118,6 +1174,8 @@ async function openCommandPrompter(
     onInsert: (text: string) => void,
     onRunNow?: (text: string) => void,
     onPromptNestedCb?: (commandText: string, applyBack: (newText: string) => void) => void,
+    /** Existing command text for round-trip populate of the form. */
+    initialText?: string,
 ): Promise<void> {
     const app = App();
     if (!app || !activeTab()?.connectionId) return;
@@ -1134,12 +1192,10 @@ async function openCommandPrompter(
             close();
             if (commandText) onRunNow ? onRunNow(commandText) : onInsert(commandText);
         },
-        onInsert: (commandText) => {
-            onInsert(commandText);
-        },
         onClose: () => close(),
         onPromptNested: onPromptNestedCb,
-    });
+        cmdXml: result.xml,
+    }, initialText);
 }
 
 // Nested prompt recursion — unbounded depth. Each level's applyBack writes the
@@ -1155,6 +1211,7 @@ function promptNestedRecursively(commandText: string, applyBack: (t: string) => 
         (text) => applyBack(text),
         (text) => applyBack(text),
         (ct, ab) => promptNestedRecursively(ct, ab),
+        commandText,
     );
 }
 
@@ -1203,14 +1260,14 @@ async function doPrompt(): Promise<void> {
         await openCommandPrompter(
             ref,
             (text) => replaceSpan(text),
-            (text) => {
-                replaceSpan(text);
-                void doRun();
-            },
+            // Enter writes back only — the user presses Run themselves.
+            (text) => replaceSpan(text),
             // Nested: prompt the command typed into a CMD/CMDSTR field.
             (commandText, applyBack) => {
                 promptNestedRecursively(commandText, applyBack);
             },
+            // Round-trip: prefill the form from the existing statement text.
+            text,
         );
     } catch (err) {
         showMessages([], String((err as Error)?.message ?? err));
@@ -1230,6 +1287,35 @@ el<HTMLButtonElement>("btn-new-conn").addEventListener("click", () => addTab());
 els.btnLoadMore.addEventListener("click", () => void doFetch(false));
 els.btnLoadAll.addEventListener("click", () => void doFetch(true));
 
+// Statement-history recall in the editor. F9 = previous (older), F8 = next
+// (newer) — same keys as the cozzi-cl-prompter Command Entry. ArrowUp/ArrowDown
+// recall only when the caret sits on the first/last line with no selection and
+// no modifiers, so normal caret movement and Cmd/Ctrl/Alt+Arrow (e.g. macOS
+// document jumps) are untouched. Cursor lands at the end of the recalled text.
+function handleHistoryKeydown(ev: KeyboardEvent): void {
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    const history = inputHistories.for(activeTab()?.connectionId);
+    if (!history.hasHistory) return;
+    let direction: "prev" | "next" | undefined;
+    if (ev.key === "F9") direction = "prev";
+    else if (ev.key === "F8") direction = "next";
+    else if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
+        direction = arrowRecallDirection(
+            ev.key,
+            els.sqlInput.value,
+            els.sqlInput.selectionStart ?? 0,
+            els.sqlInput.selectionEnd ?? 0,
+        );
+    }
+    if (!direction) return;
+    const recalled = direction === "prev" ? history.prev(els.sqlInput.value) : history.next();
+    if (recalled === undefined) return;
+    ev.preventDefault();
+    els.sqlInput.value = recalled;
+    els.sqlInput.setSelectionRange(recalled.length, recalled.length);
+    pushWorkspaceState();
+}
+
 els.sqlInput.addEventListener("keydown", (ev: KeyboardEvent) => {
     if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") {
         ev.preventDefault();
@@ -1239,8 +1325,35 @@ els.sqlInput.addEventListener("keydown", (ev: KeyboardEvent) => {
         ev.preventDefault();
         void doPrompt();
     }
+    // Home/End: text-editor semantics — column 1 / end of the caret's line.
+    // (WKWebView textarea leaves these as no-ops on macOS.)
+    if ((ev.key === "Home" || ev.key === "End") && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+        const ta = els.sqlInput;
+        const pos = ta.selectionStart ?? 0;
+        const text = ta.value;
+        const lineStart = text.lastIndexOf("\n", pos - 1) + 1;
+        const nl = text.indexOf("\n", pos);
+        const lineEnd = nl === -1 ? text.length : nl;
+        const target = ev.key === "Home" ? lineStart : lineEnd;
+        ev.preventDefault();
+        if (ev.shiftKey) {
+            // Shift extends the selection from the existing anchor.
+            const anchor = ta.selectionDirection === "backward" ? ta.selectionEnd : ta.selectionStart;
+            const [a, b] = anchor === pos ? [Math.min(pos, target), Math.max(pos, target)] : [Math.min(anchor, target), Math.max(anchor, target)];
+            ta.setSelectionRange(a, b);
+        } else {
+            ta.setSelectionRange(target, target);
+        }
+        return;
+    }
+    handleHistoryKeydown(ev);
 });
-els.sqlInput.addEventListener("input", () => pushWorkspaceState());
+els.sqlInput.addEventListener("input", () => {
+    // Typing exits history-browse mode and drops the stashed draft (same as
+    // the extension's Command Entry input handler).
+    inputHistories.for(activeTab()?.connectionId).reset();
+    pushWorkspaceState();
+});
 
 el<HTMLInputElement>("in-password").addEventListener("keydown", (ev: KeyboardEvent) => {
     if (ev.key === "Enter") void doConnect();

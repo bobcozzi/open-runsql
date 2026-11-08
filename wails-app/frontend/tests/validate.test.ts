@@ -275,3 +275,14 @@ describe("Dep/PmtCtl engine", () => {
         expect(isParmVisible(cmd.pmtCtl.get("HIDDEN"), "HIDDEN", mkCtx({}))).toBe(false);
     });
 });
+
+describe("numeric parm special values (RUNPTY case)", () => {
+    it("INT2 with *SAME choice validates", () => {
+        const p = parm({ type: "INT2", len: 0, dft: "*SAME", rangeMin: 1, rangeMax: 99,
+            choices: [{ value: "*SAME" }] });
+        expect(validateField(p, "*SAME")).toBeUndefined();
+        expect(validateField(p, "50")).toBeUndefined();
+        expect(validateField(p, "abc")).toMatch(/numeric/);
+        expect(validateField(p, "0")).toMatch(/>= 1/);
+    });
+});

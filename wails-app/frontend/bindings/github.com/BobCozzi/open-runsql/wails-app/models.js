@@ -516,6 +516,234 @@ export class RunRequest {
     }
 }
 
+export class SpooledFileInfo {
+    /**
+     * Creates a new SpooledFileInfo instance.
+     * @param {Partial<SpooledFileInfo>} [$$source = {}] - The source object to create the SpooledFileInfo.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("number" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["number"] = "";
+        }
+        if (!("jobName" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["jobName"] = "";
+        }
+        if (!("jobUser" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["jobUser"] = "";
+        }
+        if (!("jobNumber" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["jobNumber"] = "";
+        }
+        if (!("userData" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["userData"] = "";
+        }
+        if (!("outqName" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["outqName"] = "";
+        }
+        if (!("outqLib" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["outqLib"] = "";
+        }
+        if (!("createDate" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["createDate"] = "";
+        }
+        if (!("createTime" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["createTime"] = "";
+        }
+        if (!("pages" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["pages"] = 0;
+        }
+        if (!("size" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["size"] = 0;
+        }
+        if (!("status" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["status"] = "";
+        }
+        if (!("holdStatus" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["holdStatus"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SpooledFileInfo instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {SpooledFileInfo}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SpooledFileInfo(/** @type {Partial<SpooledFileInfo>} */($$parsedSource));
+    }
+}
+
+export class SpooledFileRequest {
+    /**
+     * Creates a new SpooledFileRequest instance.
+     * @param {Partial<SpooledFileRequest>} [$$source = {}] - The source object to create the SpooledFileRequest.
+     */
+    constructor($$source = {}) {
+        if (!("connectionId" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["connectionId"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["outqLib"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["outq"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["user"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["allUsers"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | undefined}
+             */
+            this["allOutqs"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SpooledFileRequest instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {SpooledFileRequest}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SpooledFileRequest(/** @type {Partial<SpooledFileRequest>} */($$parsedSource));
+    }
+}
+
+export class SpooledFileResult {
+    /**
+     * Creates a new SpooledFileResult instance.
+     * @param {Partial<SpooledFileResult>} [$$source = {}] - The source object to create the SpooledFileResult.
+     */
+    constructor($$source = {}) {
+        if (!("kind" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["kind"] = "";
+        }
+        if (!("files" in $$source)) {
+            /**
+             * @member
+             * @type {SpooledFileInfo[]}
+             */
+            this["files"] = [];
+        }
+        if (!("elapsedMs" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["elapsedMs"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SpooledFileResult instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {SpooledFileResult}
+     */
+    static createFrom($$source = {}) {
+        const $$createField1_0 = $$createType1;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("files" in $$parsedSource) {
+            $$parsedSource["files"] = $$createField1_0($$parsedSource["files"]);
+        }
+        return new SpooledFileResult(/** @type {Partial<SpooledFileResult>} */($$parsedSource));
+    }
+}
+
 export class SqlMessage {
     /**
      * Creates a new SqlMessage instance.
@@ -542,6 +770,23 @@ export class SqlMessage {
              * @type {string}
              */
             this["message"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * SecondLevelText mirrors the IBM i message-file help (Cause/Recovery)
+             * resolved by the bridge from QSQLMSG/QCPFMSG.
+             * @member
+             * @type {string | undefined}
+             */
+            this["secondLevelText"] = undefined;
+        }
+        if (!("kind" in $$source)) {
+            /**
+             * Kind mirrors classifyMessage buckets: error/warning/info.
+             * @member
+             * @type {string}
+             */
+            this["kind"] = "";
         }
 
         Object.assign(this, $$source);
@@ -637,9 +882,9 @@ export class SqlResult {
      * @returns {SqlResult}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType1;
-        const $$createField2_0 = $$createType3;
-        const $$createField6_0 = $$createType5;
+        const $$createField1_0 = $$createType3;
+        const $$createField2_0 = $$createType5;
+        const $$createField6_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
             $$parsedSource["columns"] = $$createField1_0($$parsedSource["columns"]);
@@ -745,8 +990,8 @@ export class WorkspaceState {
      * @returns {WorkspaceState}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType1;
-        const $$createField4_0 = $$createType3;
+        const $$createField3_0 = $$createType3;
+        const $$createField4_0 = $$createType5;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
             $$parsedSource["columns"] = $$createField3_0($$parsedSource["columns"]);
@@ -759,9 +1004,11 @@ export class WorkspaceState {
 }
 
 // Private type creation functions
-const $$createType0 = ColumnInfo.createFrom;
+const $$createType0 = SpooledFileInfo.createFrom;
 const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = $Create.Array($Create.Any);
+const $$createType2 = ColumnInfo.createFrom;
 const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = SqlMessage.createFrom;
+const $$createType4 = $Create.Array($Create.Any);
 const $$createType5 = $Create.Array($$createType4);
+const $$createType6 = SqlMessage.createFrom;
+const $$createType7 = $Create.Array($$createType6);

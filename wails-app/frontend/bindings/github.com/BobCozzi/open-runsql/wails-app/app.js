@@ -130,12 +130,24 @@ export function ListDetached() {
 }
 
 /**
+ * ListSpooledFiles lists spooled files on the connection, filtered by user
+ * and/or output queue (blank user = *CURRENT; allUsers/allOutqs widen scope).
+ * @param {$models.SpooledFileRequest} req
+ * @returns {$CancellablePromise<$models.SpooledFileResult | null>}
+ */
+export function ListSpooledFiles(req) {
+    return $Call.ByID(2924065984, req).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType11($result);
+    }));
+}
+
+/**
  * ListWorkspaces returns all workspaces (main window tab strip restore).
  * @returns {$CancellablePromise<$models.WorkspaceState[]>}
  */
 export function ListWorkspaces() {
     return $Call.ByID(1856021707).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType10($result);
+        return $$createType12($result);
     }));
 }
 
@@ -216,4 +228,6 @@ const $$createType6 = $models.WorkspaceState.createFrom;
 const $$createType7 = $models.ConnectionProfile.createFrom;
 const $$createType8 = $Create.Array($$createType7);
 const $$createType9 = $Create.Array($Create.Any);
-const $$createType10 = $Create.Array($$createType6);
+const $$createType10 = $models.SpooledFileResult.createFrom;
+const $$createType11 = $Create.Nullable($$createType10);
+const $$createType12 = $Create.Array($$createType6);

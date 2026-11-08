@@ -471,10 +471,27 @@ export function rewriteLeadingPositionalsByList(fullCmd: string, positionalKwds:
 
     if (!isPositional) break;
 
+    // Gobble "/qualifier" continuations of a qualified name: a quoted or
+    // special-value first part ('my lib'/OBJ, *LIBL/OBJ, &LIB/&OBJ) tokenizes
+    // as separate tokens around a '/' operator. No blanks allowed around '/'.
+    const isQualPart = (idx: number): boolean => {
+      const tok = tokens[idx];
+      if (!tok) return false;
+      if (tok.type === 'keyword') return tokens[idx + 1]?.type !== 'paren_open';
+      return tok.type === 'value' || tok.type === 'string' || tok.type === 'variable' || tok.type === 'symbolic_value';
+    };
+    let end = i;
+    let text = t.value;
+    while (tokens[end + 1]?.type === 'operator' && tokens[end + 1]?.value === '/' && isQualPart(end + 2)) {
+      text += `/${tokens[end + 2].value}`;
+      end += 2;
+    }
+
     const kwd = kwdList[posIdx++];
-    outVals[i] = `${kwd}(${t.value})`;
+    outVals[i] = `${kwd}(${text})`;
+    for (let k = i + 1; k <= end; k++) outVals[k] = '';
     madeChange = true;
-    i++;
+    i = end + 1;
   }
 
   // If no positionals were actually rewritten, return the original string unchanged.

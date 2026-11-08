@@ -8,7 +8,10 @@ import com.ibm.as400.access.AS400;
 import com.ibm.as400.access.AS400Message;
 import com.ibm.as400.access.Command;
 import com.ibm.as400.access.CommandCall;
+import com.ibm.as400.access.PrintObject;
 import com.ibm.as400.access.SecureAS400;
+import com.ibm.as400.access.SpooledFile;
+import com.ibm.as400.access.SpooledFileList;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -150,6 +153,12 @@ public final class Main {
                 Session s = session(r);
                 out.set("result", getCmdXml(s, required(r, "command"), text(r, "library", "")));
             }
+            case "listSpooledFiles" -> {
+                Session s = session(r);
+                out.set("result", listSpooledFiles(s,
+                        text(r, "outqLib", ""), text(r, "outq", ""), text(r, "user", ""),
+                        r.path("allUsers").asBoolean(false), r.path("allOutqs").asBoolean(false)));
+            }
             case "commit" -> { Session s = session(r); s.lock.lock(); try { s.connection.commit(); } finally { s.lock.unlock(); } }
             case "rollback" -> { Session s = session(r); s.lock.lock(); try { s.connection.rollback(); } finally { s.lock.unlock(); } }
             case "setAutoCommit" -> {
@@ -275,6 +284,110 @@ public final class Main {
         result.put("kind", "cmdxml");
         result.put("xml", xml);
         result.put("bytes", xml.getBytes(StandardCharsets.UTF_8).length);
+        result.put("elapsedMs", elapsedMs(started));
+        return result;
+    }
+
+    // ATTR_OUTQUELIB/ATTR_OUTQUE are package-private constants in JT400's
+    // PrintObject; the attribute IDs are stable wire-protocol values.
+    private static final int ATTR_OUTQUELIB = 0x0049;
+    private static final int ATTR_OUTQUE = 0x004A;
+
+    // Spooled-file field fetcher: every getter is guarded per-field so one
+    // unreadable attribute (authority, file gone mid-list) blanks that field
+    // instead of failing the whole list.
+    private interface SplfValue { Object get() throws Exception; }
+
+    private static String splfStr(SplfValue g) {
+        try {
+            Object v = g.get();
+            return v == null ? "" : nullToEmpty(String.valueOf(v).trim());
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
+    private static long splfLong(SplfValue g) {
+        try {
+            Object v = g.get();
+            return v instanceof Number n ? n.longValue() : 0;
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    // JT400 ATTR_DATE is CYYMMDD (C: 0=19xx, 1=20xx); convert to ISO YYYY-MM-DD.
+    // Unexpected shapes come back as-is (trimmed) rather than failing.
+    private static String splfDateIso(String cymmdd) {
+        String d = cymmdd == null ? "" : cymmdd.trim();
+        if (d.length() != 7) return d;
+        try {
+            int year = 1900 + Integer.parseInt(d.substring(0, 1)) * 100
+                    + Integer.parseInt(d.substring(1, 3));
+            return String.format(Locale.ROOT, "%04d-%s-%s", year, d.substring(3, 5), d.substring(5, 7));
+        } catch (NumberFormatException e) {
+            return d;
+        }
+    }
+
+    // JT400 ATTR_TIME is HHMMSS; convert to ISO HH:MM:SS.
+    private static String splfTimeIso(String hhmmss) {
+        String v = hhmmss == null ? "" : hhmmss.trim();
+        if (v.length() != 6) return v;
+        return v.substring(0, 2) + ":" + v.substring(2, 4) + ":" + v.substring(4, 6);
+    }
+
+    private static ObjectNode listSpooledFiles(Session s, String outqLib, String outq,
+            String user, boolean allUsers, boolean allOutqs) throws Exception {
+        long started = System.nanoTime();
+        // clSystem ops (executeCL/getCmdXml) do not take s.lock; the print
+        // service is independent of the JDBC connection. Output-queue-not-found
+        // and authority failures propagate to handleLine -> ok:false with the
+        // host message text (shown in the frontend Messages pane).
+        SpooledFileList list = new SpooledFileList(s.clSystem);
+        ArrayNode files = JSON.createArrayNode();
+        try {
+            list.setUserFilter(allUsers ? "*ALL"
+                    : (user == null || user.isBlank() ? "*CURRENT" : user.trim().toUpperCase(Locale.ROOT)));
+            if (allOutqs) {
+                // %ALL%/%ALL% is the only all-queues form JT400 accepts.
+                list.setQueueFilter("/QSYS.LIB/%ALL%.LIB/%ALL%.OUTQ");
+            } else if (outq != null && !outq.isBlank()) {
+                String lib = outqLib == null || outqLib.isBlank()
+                        ? "%LIBL%" : outqLib.trim().toUpperCase(Locale.ROOT);
+                list.setQueueFilter("/QSYS.LIB/" + lib + ".LIB/"
+                        + outq.trim().toUpperCase(Locale.ROOT) + ".OUTQ");
+            }
+            list.openSynchronously();
+            Enumeration<SpooledFile> e = list.getObjects();
+            while (e.hasMoreElements()) {
+                SpooledFile f = e.nextElement();
+                ObjectNode file = JSON.createObjectNode();
+                file.put("name", splfStr(f::getName));
+                file.put("number", splfStr(f::getNumber));
+                file.put("jobName", splfStr(f::getJobName));
+                file.put("jobUser", splfStr(f::getJobUser));
+                file.put("jobNumber", splfStr(f::getJobNumber));
+                file.put("userData", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_USERDATA)));
+                file.put("outqName", splfStr(() -> f.getStringAttribute(ATTR_OUTQUE)));
+                file.put("outqLib", splfStr(() -> f.getStringAttribute(ATTR_OUTQUELIB)));
+                file.put("createDate", splfDateIso(splfStr(f::getCreateDate)));
+                file.put("createTime", splfTimeIso(splfStr(f::getCreateTime)));
+                file.put("pages", splfLong(() -> f.getIntegerAttribute(PrintObject.ATTR_PAGES)));
+                // Byte size = SPLF_SIZE * SPLF_SIZE_MULT (multiplier may be 0/blank).
+                long mult = splfLong(() -> f.getIntegerAttribute(PrintObject.ATTR_SPLF_SIZE_MULT));
+                file.put("size", splfLong(() -> f.getIntegerAttribute(PrintObject.ATTR_SPLF_SIZE))
+                        * (mult > 0 ? mult : 1));
+                file.put("status", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_SPLFSTATUS)));
+                file.put("holdStatus", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_HOLD)));
+                files.add(file);
+            }
+        } finally {
+            try { list.close(); } catch (Exception ignored) {}
+        }
+        ObjectNode result = JSON.createObjectNode();
+        result.put("kind", "spooledFiles");
+        result.set("files", files);
         result.put("elapsedMs", elapsedMs(started));
         return result;
     }

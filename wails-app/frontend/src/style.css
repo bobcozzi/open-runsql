@@ -502,14 +502,42 @@ font-size: 12px;
     padding: 10px 12px;
 }
 
-/* Prompter hosted in a work-pane: fill the pane and scroll vertically.
-   .work-pane has overflow:hidden which would otherwise clip the form. */
+/* Prompter hosted in a work-pane: fill the pane; header pinned, form scrolls.
+   Zero out the base .prompter padding/max-height — the pane manages layout. */
 .work-pane.prompter {
     max-height: none;
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow: hidden;
     flex: 1;
     min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+}
+
+.work-pane.prompter .prompter-head {
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding: 10px 12px 6px;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Built command string spans the full header width under the title row. */
+.work-pane.prompter .prompter-preview {
+    flex-basis: 100%;
+    order: 3;
+}
+
+.work-pane.prompter .prompter-form {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 10px 12px;
+}
+
+.work-pane.prompter .prompter-actions {
+    flex: 0 0 auto;
+    padding: 6px 12px 10px;
 }
 
 .prompter-head {
@@ -521,6 +549,13 @@ font-size: 12px;
 
 .prompter-title {
     font-weight: 600;
+}
+
+/* <xml> copy button sits at the right end of the prompter header. */
+.prompter-xml {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    padding: 2px 8px;
 }
 
 .prompter-form {
@@ -593,6 +628,34 @@ font-size: 12px;
     padding-right: 4px;
 }
 
+/* Keyword in the label stands out even before focus. */
+.prompter-kwd {
+    color: var(--fg);
+    font-weight: 600;
+}
+
+/* QUAL-only parms: parts render inline inside a title-less rule box (the
+   fieldset look without the legend) — the border + shade shows the parts
+   belong together. Part 0 (the whole-value slot) stays flush with ordinary
+   fields; parts 1+ indent beneath it. */
+.prompter-qual-band {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 0 4px 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.prompter-qual-band>.prompter-field {
+    padding: 2px 6px 2px 0;
+}
+
+.prompter-qual-band>.prompter-field+.prompter-field {
+    margin-left: 32px;
+}
+
 /* Focused field: keyword lights up in accent; ▶ arrow sits right of input. */
 .prompter-field.focused .prompter-kwd {
     color: var(--accent-hover);
@@ -644,10 +707,16 @@ font-size: 12px;
     box-sizing: border-box;
 }
 
-.prompter-group legend {
+/* Group title straddles the top border, legend-style (replaces <legend>,
+   which WebKit breaks when the fieldset is display:flex). */
+.prompter-group-title {
     color: var(--fg-dim);
     font-size: 12px;
+    font-weight: 600;
+    margin: -15px 0 2px;
     padding: 0 6px;
+    background: var(--bg-alt);
+    align-self: flex-start;
 }
 
 .prompter-actions {
@@ -845,6 +914,56 @@ tr:nth-child(even) td {
     display: flex;
     align-items: center;
     justify-content: center;
+    color: var(--fg-dim);
+}
+
+/* Spooled Files pane */
+.spool-filters {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    background: var(--bg-alt);
+    border-bottom: 1px solid var(--border);
+}
+
+.spool-filters label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--fg-dim);
+    font-size: 12px;
+}
+
+.spool-filters input[type="text"] {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    width: 110px;
+}
+
+.spool-filters input[type="text"]:focus {
+    outline: 1px solid var(--accent);
+}
+
+.spool-filters input[type="text"]:disabled {
+    opacity: 0.5;
+}
+
+.spool-filters .spool-check {
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    padding-bottom: 6px;
+}
+
+.spool-empty {
+    padding: 24px;
+    text-align: center;
     color: var(--fg-dim);
 }
 

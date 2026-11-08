@@ -68,6 +68,38 @@ export interface CmdXmlResult {
     bytes: number;
 }
 
+export interface SpooledFileRequest {
+    connectionId: string;
+    outqLib?: string;
+    outq?: string;
+    user?: string;
+    allUsers?: boolean;
+    allOutqs?: boolean;
+}
+
+export interface SpooledFileInfo {
+    name: string;
+    number: string;
+    jobName: string;
+    jobUser: string;
+    jobNumber: string;
+    userData: string;
+    outqName: string;
+    outqLib: string;
+    createDate: string;
+    createTime: string;
+    pages: number;
+    size: number;
+    status: string;
+    holdStatus: string;
+}
+
+export interface SpooledFileResult {
+    kind: "spooledFiles";
+    files: SpooledFileInfo[];
+    elapsedMs: number;
+}
+
 export interface ConnectionProfile {
     name: string;
     host: string;
@@ -92,6 +124,7 @@ export interface AppBinding {
     Run(req: { connectionId: string; text: string; fetchSize: number }): Promise<SqlResult | CLResult>;
     Fetch(req: { connectionId: string; cursorId: string; fetchSize: number }): Promise<SqlResult>;
     GetCmdXml(req: { connectionId: string; command: string; library?: string }): Promise<CmdXmlResult>;
+    ListSpooledFiles(req: SpooledFileRequest): Promise<SpooledFileResult>;
     ListConnectionProfiles(): Promise<ConnectionProfile[]>;
     SaveConnectionProfile(p: ConnectionProfile): Promise<void>;
     DeleteConnectionProfile(name: string): Promise<void>;

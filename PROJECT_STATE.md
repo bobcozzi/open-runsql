@@ -87,6 +87,10 @@ Messages; Messages tab moved first per ACS, Results remains default focus).
   Dep NbrTrueRel operators simplified. P2 cosmetics open (focus arrow, green
   non-default coloring, F-key footer, help buttons, round-trip populate of an
   existing command string — parseCLParms/populator copied but not wired).
+  DONE since: defaults render as real values (no placeholder; buildCommand
+  skips default-valued fields), valToMapToMap (Val→MapTo) wired into Dep/PmtCtl
+  evaluation, SPCFD/UNSPCFD default-aware, ELEM composite/first-allowed form
+  defaults, touched-field tracking (submit-only Dep eval).
 - Batch runs: Results shows LAST statement's set; Messages accumulate per
   statement (reset on new batch, append on single runs).
 - No per-tab result history yet (ACS results list).

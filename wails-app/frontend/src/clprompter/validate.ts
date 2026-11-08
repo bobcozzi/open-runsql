@@ -99,16 +99,19 @@ export function validateField(
         return `${kwd} must be exactly ${effLen} characters (Full=YES).`;
     }
 
-    // Numeric types
+    // Numeric types — a listed special/choice value is valid even on a
+    // numeric parm (RUNPTY *SAME MapTo=0: the host maps it; the display
+    // value isn't digits).
     if (parm.type && NUMERIC_TYPES.has(parm.type.toUpperCase())) {
-        if (!/^[+-]?\d+(\.\d+)?$/.test(value)) {
+        if (!isChoiceValue && !/^[+-]?\d+(\.\d+)?$/.test(value)) {
             return `${kwd} must be numeric.`;
         }
     }
 
-    // NAME-family
+    // NAME-family — hybrid: a listed special/choice value is valid even when
+    // it isn't a NAME (CURLIB Dft=*SAME case; extension createParmInput).
     if (parm.type && NAME_TYPES.has(parm.type.toUpperCase())) {
-        if (!isValidNameValue(value, effLen || undefined, parm.type)) {
+        if (!isChoiceValue && !isValidNameValue(value, effLen || undefined, parm.type)) {
             return `${kwd} is not a valid ${parm.type} name.`;
         }
     }

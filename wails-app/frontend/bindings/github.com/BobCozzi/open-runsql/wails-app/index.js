@@ -16,6 +16,9 @@ export {
     FetchRequest,
     GetCmdXmlRequest,
     RunRequest,
+    SpooledFileInfo,
+    SpooledFileRequest,
+    SpooledFileResult,
     SqlMessage,
     SqlResult,
     WorkspaceState

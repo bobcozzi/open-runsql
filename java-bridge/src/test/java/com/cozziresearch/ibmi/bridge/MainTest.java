@@ -288,7 +288,7 @@ class MainTest {
     @Test
     void nullToEmptyMapsNullOnly() throws Throwable {
         Class<?>[] sig = { String.class };
-        assertEquals("", call("nullToEmpty", sig, new String[] { null }));
+        assertEquals("", call("nullToEmpty", sig, (Object) null));
         assertEquals("x", call("nullToEmpty", sig, "x"));
     }
 

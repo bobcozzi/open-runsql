@@ -34,11 +34,21 @@ export interface ParmDescriptor {
     min: number;          // 1 = required
     max: number;
     posNbr?: number;
+    /** Document (XML arrival) order of the Parm; positional binding order. */
+    xmlOrder?: number;
     /** Rstd=YES: value must come from choices/single values. */
     rstd: boolean;
     choices: ParmChoice[]; // SpcVal/Values displayable entries (pseudo-values stripped)
     /** SngVal: mutually exclusive single values. */
     sngVals: string[];
+    /** Inline choice-program values (Choice="__PGM" → ChoicePgmValues>Value).
+        Advisory suggestions only (Rstd=NO): each Val is "value description".
+        Rendered in the datalist, never the restricted <select>. */
+    choicePgmValues: ParmChoice[];
+    /** Choice attribute display text sent by the host ("*SAME, *NO, *YES",
+        "Name", "1-366"). Choice="__PGM" is a sentinel: the display text ships
+        separately in ChoicePgmText@Text. */
+    choice?: string;
     full: boolean;        // Full=YES: exact length required
     alwVar: boolean;      // AlwVar=NO: reject &VARIABLE
     rtnVal: boolean;      // RtnVal=YES: require &VARIABLE
@@ -100,6 +110,9 @@ export interface CmdDescriptor {
     deps: DepConstraint[];
     /** kwd → visibility rule, for parms carrying a PmtCtl attribute. */
     pmtCtl: Map<string, PmtCtlEntry>;
+    /** kwd → {display Val → internal MapTo} for Dep/PmtCtl comparisons
+        (port of the extension's valToMapToMap). */
+    valToInternal: Record<string, Record<string, string>>;
 }
 
 function childElements(el: Element, name: string): Element[] {
@@ -182,6 +195,39 @@ function extractChoices(parmEl: Element): { choices: ParmChoice[]; sngVals: stri
     return { choices, sngVals };
 }
 
+/** ChoicePgmValues>Value, when Choice="__PGM" ships the choice list inline.
+    Each Val is "value description" (e.g. "AFR Afrikaans"): split into the
+    value token + display text. Pseudo-values are stripped. */
+function extractChoicePgmValues(parmEl: Element): ParmChoice[] {
+    const out: ParmChoice[] = [];
+    for (const cpv of childElements(parmEl, "ChoicePgmValues")) {
+        for (const v of childElements(cpv, "Value")) {
+            const raw = attr(v, "Val");
+            if (raw == null || isPseudoValue(raw)) continue;
+            const m = raw.match(/^(\S+)\s+(.*)$/);
+            if (m) out.push({ value: m[1], text: m[2].trim() || undefined });
+            else out.push({ value: raw });
+        }
+    }
+    return out;
+}
+
+/** Choice attribute display text. "__PGM" is a sentinel meaning the choice
+    program supplies the values — the displayable text ships inline in
+    ChoicePgmText@Text (e.g. "*SAME, *SYSVAL..."). */
+function extractChoiceText(el: Element): string | undefined {
+    const c = attr(el, "Choice");
+    if (!c) return undefined;
+    if (c === "__PGM") {
+        for (const t of childElements(el, "ChoicePgmText")) {
+            const text = attr(t, "Text");
+            if (text) return text;
+        }
+        return undefined;
+    }
+    return c;
+}
+
 function extractRelConstraints(el: Element): RelConstraint[] | undefined {
     const out: RelConstraint[] = [];
     const rel = attr(el, "Rel");
@@ -196,12 +242,17 @@ function extractRelConstraints(el: Element): RelConstraint[] | undefined {
     return out.length ? out : undefined;
 }
 
-function describeElement(el: Element, meta?: { Prompt?: string; Type?: string }, parent?: { choices: ParmChoice[]; sngVals: string[] }): ParmDescriptor {
+function describeElement(el: Element, meta?: { Prompt?: string; Type?: string }, parent?: { choices: ParmChoice[]; sngVals: string[]; choicePgmValues: ParmChoice[] }): ParmDescriptor {
     const own = extractChoices(el);
+    const ownCpv = extractChoicePgmValues(el);
     // Choice metadata on a container parent applies to single-field children
     // (e.g. CHGJOB LOG: ELEM Len=1 children inherit the parent's SpcVal list).
     const choices = own.choices.length ? own.choices : (parent?.choices ?? []);
     const sngVals = own.sngVals.length ? own.sngVals : (parent?.sngVals ?? []);
+    const choicePgmValues = ownCpv.length ? ownCpv : (parent?.choicePgmValues ?? []);
+    // Choice text is NOT inherited: each parm/part shows only its own Choice
+    // attribute (a parent's Choice describes the whole container value).
+    const choice = extractChoiceText(el);
     const type = attr(el, "Type") ?? meta?.Type;
     const isContainer = type != null && isContainerType(type);
     return {
@@ -216,6 +267,8 @@ function describeElement(el: Element, meta?: { Prompt?: string; Type?: string },
         rstd: yesAttr(el, "Rstd"),
         choices,
         sngVals,
+        choicePgmValues,
+        choice,
         full: yesAttr(el, "Full"),
         alwVar: !noAttr(el, "AlwVar"),
         rtnVal: yesAttr(el, "RtnVal"),
@@ -237,12 +290,18 @@ function describeContainerChildren(parmEl: Element): ParmDescriptor[] {
     const out: ParmDescriptor[] = [];
     const parentPrompt = attr(parmEl, "Prompt") ?? "";
     const parentChoices = extractChoices(parmEl);
+    const parentChoicePgmValues = extractChoicePgmValues(parmEl);
     const parentDft = attr(parmEl, "Dft");
+    let elemIdx = 0;
     // QUAL parts render in XML document order (object name, then library);
     // the reversal happens only when assembling the output string.
+    // Parent SpcVal/SngVal/ChoicePgmValues inherit only into the FIRST part —
+    // that's the whole-value slot (JOB(*) / PGM(*SAME)). Later parts (Library
+    // etc.) keep only their own declared values.
     const qualEls = childElements(parmEl, "QUAL");
     for (let i = 0; i < qualEls.length; i++) {
-        const d = describeElement(qualEls[i], undefined, parentChoices);
+        const meta = i === 0 ? { ...parentChoices, choicePgmValues: parentChoicePgmValues } : undefined;
+        const d = describeElement(qualEls[i], undefined, meta);
         d.kwd = `${i}`; // part index in document order
         if (i === 0) {
             // First part inherits the parent's Dft when it's one of the
@@ -255,11 +314,36 @@ function describeContainerChildren(parmEl: Element): ParmDescriptor[] {
         out.push(d);
     }
     for (const e of childElements(parmEl, "ELEM")) {
-        const d = describeElement(e, undefined, parentChoices);
-        d.kwd = "";
+        const d = describeElement(e, undefined, { ...parentChoices, choicePgmValues: parentChoicePgmValues });
+        d.kwd = `${elemIdx++}`; // ELEM index within the parent (matches composite-Dft part order)
         out.push(d);
     }
     return out;
+}
+
+/**
+ * kwd → {display Val → internal MapTo} from SpcVal/SngVal Value@MapTo.
+ * Dep/PmtCtl CmpVal values are in the internal (MapTo) form; the view
+ * translates user-visible values through this map before comparing.
+ * Ported from the extension's buildValToMapToMapFromDoc.
+ */
+function buildValToInternal(doc: Document): Record<string, Record<string, string>> {
+    const result: Record<string, Record<string, string>> = {};
+    for (const parm of Array.from(doc.getElementsByTagName("Parm"))) {
+        const kwd = parm.getAttribute("Kwd");
+        if (!kwd) continue;
+        const valMap: Record<string, string> = {};
+        const valueNodes = ["SpcVal", "SngVal"].flatMap((tag) =>
+            Array.from(parm.getElementsByTagName(tag)).flatMap((sv) =>
+                Array.from(sv.getElementsByTagName("Value"))));
+        for (const vNode of valueNodes) {
+            const v = vNode.getAttribute("Val");
+            const m = vNode.getAttribute("MapTo")?.trim();
+            if (v && m && v !== m) valMap[v] = m;
+        }
+        if (Object.keys(valMap).length > 0) result[kwd] = valMap;
+    }
+    return result;
 }
 
 // Display rules ported from prompter.ts / promptHelpers.ts:
@@ -374,7 +458,7 @@ export function parseCmdXml(xml: string): CmdDescriptor {
         .map((m, i) => ({ m, i, pos: posOf(m) }))
         .sort((a, b) => a.pos - b.pos || a.i - b.i);
     const parms: ParmDescriptor[] = [];
-    for (const { m: meta } of ordered) {
+    for (const { m: meta, i: xmlIdx } of ordered) {
         const el = parmEls.get(meta.Kwd.toUpperCase());
         if (el && !isDisplayableParm(el, meta)) continue;
         const d = el ? describeElement(el, undefined) : ({} as ParmDescriptor);
@@ -384,6 +468,7 @@ export function parseCmdXml(xml: string): CmdDescriptor {
         d.min = el ? intAttr(el, "Min", 0) : 0;
         d.max = meta.Max ?? (el ? intAttr(el, "Max", 1) : 1);
         d.posNbr = el ? intAttr(el, "PosNbr", 0) || undefined : meta.PosNbr;
+        d.xmlOrder = xmlIdx;
         if (el && d.children.length === 0 && (meta.Quals?.length || meta.Elems?.length)) {
             d.children = describeContainerChildren(el);
         }
@@ -398,6 +483,7 @@ export function parseCmdXml(xml: string): CmdDescriptor {
         parms,
         deps,
         pmtCtl,
+        valToInternal: buildValToInternal(doc),
     };
 }
 
