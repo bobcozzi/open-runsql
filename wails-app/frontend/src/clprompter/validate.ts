@@ -84,12 +84,18 @@ export function validateField(
         return `${kwd} requires a CL variable (e.g. &RESULT).`;
     }
 
-    // Length
+    // Length — Len bounds only plain literals. CL variables already returned
+    // above; expressions/%BIFs and choice/single values are exempt regardless
+    // of Len (e.g. CHGJOB LOG: Len=1 with *SECLVL; VAR(%SST(&OBJ 11 10)) in a
+    // char(10) field). Quoted literals are measured without the quotes.
     const effLen = parm.len ?? 0;
-    if (effLen > 0 && value.length > effLen && !parm.choices.length) {
+    const literal = /^'.*'$/.test(value) ? value.slice(1, -1).replace(/''/g, "'") : value;
+    const isChoiceValue = [...parm.choices.map((c) => c.value), ...parm.sngVals]
+        .some((a) => a.toUpperCase() === value.toUpperCase());
+    if (effLen > 0 && !isChoiceValue && !isCLExpression(value) && literal.length > effLen) {
         return `${kwd} is limited to ${effLen} characters.`;
     }
-    if (parm.full && effLen > 0 && value.length !== effLen) {
+    if (parm.full && effLen > 0 && !isChoiceValue && !isCLExpression(value) && literal.length !== effLen) {
         return `${kwd} must be exactly ${effLen} characters (Full=YES).`;
     }
 

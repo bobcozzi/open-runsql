@@ -55,20 +55,40 @@ export interface ParmDescriptor {
     children: ParmDescriptor[]; // QUAL parts / ELEM rows (recursive)
 }
 
+export interface DepParmEntry {
+    kwd: string;
+    rel: string;      // EQ, NE, GT, LT, GE, LE, NL, NG, SPCFD
+    cmpVal?: string;  // literal internal value to compare against
+    cmpKwd?: string;  // keyword of another parameter to compare against
+}
+
 export interface DepConstraint {
-    ctlKwd: string;
-    cmpKwd: string;
-    cmpVal: string;
-    nbrTrue?: number;
-    nbrTrueRel?: string;
-    msgId?: string;
+    ctlKwdRel: string;  // ALWAYS, EQ, NE, SPCFD
+    ctlKwd?: string;    // controlling keyword (absent when ALWAYS)
+    cmpVal?: string;    // internal value to compare ctlKwd against
+    nbrTrueRel: string; // GT, GE, EQ, LE, LT, NE, ALL
+    nbrTrue: number;    // threshold count
+    msgId: string;      // e.g. "CPD2830"
+    depParms: DepParmEntry[];
 }
 
 export interface PmtCtlCond {
+    rel: string;     // EQ, NE, GT, LT, GE, LE, NL, NG, SPCFD, UNSPCFD
+    cmpVal?: string; // absent for SPCFD/UNSPCFD
+}
+
+export interface PmtCtlGroup {
     ctlKwd: string;
-    nbrTrue?: number;
-    nbrTrueRel?: string;
-    lglRel?: string;
+    nbrTrueRel: string; // EQ, NE, GT, LT, GE, LE, NL, NG, ALL
+    nbrTrue: number;
+    lglRel?: string;    // AND | OR (relation to previous group)
+    conds: PmtCtlCond[];
+}
+
+/** Parm visibility: PMTCTL groups; PMTRQS = show only when user supplied a value. */
+export interface PmtCtlEntry {
+    kind: "PMTCTL" | "PMTRQS";
+    groups: PmtCtlGroup[];
 }
 
 export interface CmdDescriptor {
@@ -78,7 +98,8 @@ export interface CmdDescriptor {
     maxPos: number;
     parms: ParmDescriptor[];
     deps: DepConstraint[];
-    pmtCtl: PmtCtlCond[];
+    /** kwd → visibility rule, for parms carrying a PmtCtl attribute. */
+    pmtCtl: Map<string, PmtCtlEntry>;
 }
 
 function childElements(el: Element, name: string): Element[] {
@@ -127,27 +148,36 @@ export function isPseudoValue(v: string): boolean {
     return PSEUDO_VALUE_PREFIXES.some((p) => up.startsWith(p));
 }
 
-/** SpcVal + Values>Value, displayable entries only, plus SngVal separately. */
+/** SpcVal + Values>Value, displayable entries only, plus SngVal separately.
+    IBM XML wraps values: <SpcVal><Value Val="..." ValTxt="..."/></SpcVal>. */
 function extractChoices(parmEl: Element): { choices: ParmChoice[]; sngVals: string[] } {
     const choices: ParmChoice[] = [];
     const sngVals: string[] = [];
+    const choiceFrom = (v: Element): ParmChoice | undefined => {
+        const val = attr(v, "Val");
+        if (val == null || isPseudoValue(val)) return undefined;
+        return { value: val, text: attr(v, "ValTxt") ?? attr(v, "Prompt") };
+    };
+    const addChoice = (v: Element) => {
+        const c = choiceFrom(v);
+        if (c) choices.push(c);
+    };
+    const addSng = (v: Element) => {
+        const c = choiceFrom(v);
+        if (c) sngVals.push(c.value);
+    };
     for (const spc of childElements(parmEl, "SpcVal")) {
-        const val = attr(spc, "Val");
-        if (val != null && !isPseudoValue(val)) {
-            choices.push({ value: val, text: attr(spc, "ValTxt") ?? attr(spc, "Prompt") });
-        }
+        const kids = childElements(spc, "Value");
+        if (kids.length) kids.forEach(addChoice);
+        else addChoice(spc); // flat form: <SpcVal Val="..."/>
     }
     for (const sng of childElements(parmEl, "SngVal")) {
-        const val = attr(sng, "Val");
-        if (val != null && !isPseudoValue(val)) sngVals.push(val);
+        const kids = childElements(sng, "Value");
+        if (kids.length) kids.forEach(addSng);
+        else addSng(sng);
     }
     for (const values of childElements(parmEl, "Values")) {
-        for (const v of childElements(values, "Value")) {
-            const val = attr(v, "Val");
-            if (val != null && !isPseudoValue(val)) {
-                choices.push({ value: val, text: attr(v, "ValTxt") ?? attr(v, "Prompt") });
-            }
-        }
+        for (const v of childElements(values, "Value")) addChoice(v);
     }
     return { choices, sngVals };
 }
@@ -207,14 +237,22 @@ function describeContainerChildren(parmEl: Element): ParmDescriptor[] {
     const out: ParmDescriptor[] = [];
     const parentPrompt = attr(parmEl, "Prompt") ?? "";
     const parentChoices = extractChoices(parmEl);
-    // QUAL parts: the parent Prompt labels the LAST part (QUAL0) in IBM's XML;
-    // render right-to-left so the slash order reads left-to-right.
+    const parentDft = attr(parmEl, "Dft");
+    // QUAL parts render in XML document order (object name, then library);
+    // the reversal happens only when assembling the output string.
     const qualEls = childElements(parmEl, "QUAL");
     for (let i = 0; i < qualEls.length; i++) {
         const d = describeElement(qualEls[i], undefined, parentChoices);
-        d.kwd = `${qualEls.length - 1 - i}`; // part index from the right
-        if (i === 0 && !d.prompt) d.prompt = parentPrompt;
-        out.unshift(d);
+        d.kwd = `${i}`; // part index in document order
+        if (i === 0) {
+            // First part inherits the parent's Dft when it's one of the
+            // parent's SngVals (JOB(*) style: whole value is a special value).
+            if (!d.dft && parentDft && parentChoices.sngVals.some((s) => s.toUpperCase() === parentDft.toUpperCase())) {
+                d.dft = parentDft;
+            }
+            if (!d.prompt) d.prompt = parentPrompt;
+        }
+        out.push(d);
     }
     for (const e of childElements(parmEl, "ELEM")) {
         const d = describeElement(e, undefined, parentChoices);
@@ -263,28 +301,80 @@ export function parseCmdXml(xml: string): CmdDescriptor {
 
     const deps: DepConstraint[] = [];
     for (const dep of Array.from(cmdEl.getElementsByTagName("Dep"))) {
-        deps.push({
-            ctlKwd: attr(dep, "CtlKwd") ?? "",
-            cmpKwd: attr(dep, "CmpKwd") ?? "",
-            cmpVal: attr(dep, "CmpVal") ?? "",
-            nbrTrue: numAttr(dep, "NbrTrue"),
-            nbrTrueRel: attr(dep, "NbrTrueRel"),
-            msgId: attr(dep, "MsgID"),
-        });
+        const depParms: DepParmEntry[] = [];
+        for (const dp of Array.from(dep.getElementsByTagName("DepParm"))) {
+            const kwd = attr(dp, "Kwd");
+            const rel = attr(dp, "Rel");
+            if (!kwd || !rel) continue;
+            const entry: DepParmEntry = { kwd, rel: rel.toUpperCase() };
+            const cv = attr(dp, "CmpVal");
+            if (cv !== undefined) entry.cmpVal = cv;
+            const ck = attr(dp, "CmpKwd");
+            if (ck) entry.cmpKwd = ck;
+            depParms.push(entry);
+        }
+        if (depParms.length > 0) {
+            deps.push({
+                ctlKwdRel: (attr(dep, "CtlKwdRel") ?? "ALWAYS").toUpperCase(),
+                ctlKwd: attr(dep, "CtlKwd"),
+                cmpVal: attr(dep, "CmpVal"),
+                nbrTrueRel: (attr(dep, "NbrTrueRel") ?? "GT").toUpperCase(),
+                nbrTrue: intAttr(dep, "NbrTrue", 0),
+                msgId: attr(dep, "MsgID") ?? "",
+                depParms,
+            });
+        }
     }
-    const pmtCtl: PmtCtlCond[] = [];
-    for (const pc of Array.from(cmdEl.getElementsByTagName("PmtCtl"))) {
-        pmtCtl.push({
-            ctlKwd: attr(pc, "CtlKwd") ?? "",
-            nbrTrue: numAttr(pc, "NbrTrue"),
-            nbrTrueRel: attr(pc, "NbrTrueRel"),
-            lglRel: attr(pc, "LglRel"),
-        });
+    // PmtCtl visibility: keyed by the CONTROLLED parm's Kwd. PMTCTL groups
+    // evaluate against the controlling parm's value; PMTRQS parms show only
+    // when the user has supplied a value.
+    const pmtCtl = new Map<string, PmtCtlEntry>();
+    for (const p of Array.from(doc.getElementsByTagName("Parm"))) {
+        const attrVal = p.getAttribute("PmtCtl");
+        if (attrVal !== "PMTCTL" && attrVal !== "PMTRQS") continue;
+        const kwd = p.getAttribute("Kwd");
+        if (!kwd) continue;
+        if (attrVal === "PMTRQS") {
+            pmtCtl.set(kwd, { kind: "PMTRQS", groups: [] });
+            continue;
+        }
+        const groups: PmtCtlGroup[] = [];
+        for (const el of Array.from(p.getElementsByTagName("PmtCtl"))) {
+            const ctlKwd = el.getAttribute("CtlKwd");
+            if (!ctlKwd) continue;
+            const conds: PmtCtlCond[] = [];
+            for (const cond of Array.from(el.getElementsByTagName("PmtCtlCond"))) {
+                const rel = cond.getAttribute("Rel");
+                const cmpVal = cond.getAttribute("CmpVal");
+                if (rel !== null && (cmpVal !== null || rel === "SPCFD" || rel === "UNSPCFD")) {
+                    conds.push(cmpVal !== null ? { rel: rel.toUpperCase(), cmpVal } : { rel: rel.toUpperCase() });
+                }
+            }
+            groups.push({
+                ctlKwd,
+                nbrTrueRel: (el.getAttribute("NbrTrueRel") ?? "EQ").toUpperCase(),
+                nbrTrue: Number.parseInt(el.getAttribute("NbrTrue") ?? "1", 10) || 1,
+                lglRel: el.getAttribute("LglRel") ?? undefined,
+                conds,
+            });
+        }
+        if (groups.length > 0) pmtCtl.set(kwd, { kind: "PMTCTL", groups });
     }
 
     const metas = extractParmMetas(xml);
+    // Display order follows PosNbr (positional parms first, unnumbered parms
+    // last in document order) — same as the extension's loadForm sort.
+    const posOf = (meta: ParmMeta): number => {
+        const el = parmEls.get(meta.Kwd.toUpperCase());
+        const raw = el?.getAttribute("PosNbr");
+        const n = raw != null ? Number(raw) : Number.NaN;
+        return Number.isFinite(n) && n > 0 ? n : 9999;
+    };
+    const ordered = metas
+        .map((m, i) => ({ m, i, pos: posOf(m) }))
+        .sort((a, b) => a.pos - b.pos || a.i - b.i);
     const parms: ParmDescriptor[] = [];
-    for (const meta of metas) {
+    for (const { m: meta } of ordered) {
         const el = parmEls.get(meta.Kwd.toUpperCase());
         if (el && !isDisplayableParm(el, meta)) continue;
         const d = el ? describeElement(el, undefined) : ({} as ParmDescriptor);

@@ -256,7 +256,9 @@ body {
 .combo-arrow {
     flex: 0 0 auto;
     padding: 4px 10px;
-    font-size: 11px;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--fg);
 }
 
 .combo-popup {
@@ -500,6 +502,16 @@ font-size: 12px;
     padding: 10px 12px;
 }
 
+/* Prompter hosted in a work-pane: fill the pane and scroll vertically.
+   .work-pane has overflow:hidden which would otherwise clip the form. */
+.work-pane.prompter {
+    max-height: none;
+    overflow-y: auto;
+    overflow-x: hidden;
+    flex: 1;
+    min-height: 0;
+}
+
 .prompter-head {
     display: flex;
     align-items: center;
@@ -535,7 +547,7 @@ font-size: 12px;
 }
 
 .prompter-field-cell .prompter-input {
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 120px;
 }
 
@@ -581,6 +593,19 @@ font-size: 12px;
     padding-right: 4px;
 }
 
+/* Focused field: keyword lights up in accent; ▶ arrow sits right of input. */
+.prompter-field.focused .prompter-kwd {
+    color: var(--accent-hover);
+    font-weight: 600;
+}
+
+.prompter-focus-arrow {
+    color: var(--accent-hover);
+    font-size: 12px;
+    line-height: 1;
+    align-self: center;
+}
+
 .prompter-label .prompter-add {
     margin-left: 6px;
     padding: 0 8px;
@@ -615,6 +640,8 @@ font-size: 12px;
     display: flex;
     flex-direction: column;
     gap: 6px;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .prompter-group legend {

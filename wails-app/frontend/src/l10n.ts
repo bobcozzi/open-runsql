@@ -1,0 +1,146 @@
+// Minimal NLS/l10n for the app frontend — mirrors the vscode-nls pattern used
+// in cozzi-cl-prompter (t(key, fallback)). Catalogs are plain TS objects so
+// Vite bundles them; locale comes from navigator.language at startup.
+//
+// Usage:
+//   import { t } from "./l10n";
+//   label.textContent = t("prompter.run", "Run");
+//
+// Adding a language: create src/l10n/<lang>.ts exporting the same keys, then
+// register it in CATALOGS below. Missing keys fall back to English (the
+// fallback argument is the English text, so new strings work immediately
+// without a catalog entry).
+
+export type Catalog = Record<string, string>;
+
+const en: Catalog = {
+    // Prompter actions
+    "prompter.run": "Run",
+    "prompter.insert": "Insert into editor",
+    "prompter.close": "Close",
+    "prompter.viewAll": "View all parameters",
+    "prompter.viewAll.active": "Show prompted parameters",
+    "prompter.viewAll.title": "Show parameters hidden by prompt-control conditions",
+    "prompter.nested": "Prompt…",
+    "prompter.nested.title": "Prompt the command in this field (nested)",
+    // Prompter field hints and labels
+    "prompter.hintExactChars": "exactly {len} chars",
+    "prompter.hintMaxChars": "max {len} chars",
+    "prompter.hintRange": "{min} to {max}",
+    "prompter.hintOrAlone": "or {values} alone",
+    "prompter.hintClVarOnly": "CL variable only",
+    "prompter.hintNoVariable": "no &variable",
+    "prompter.required": "(required)",
+    "prompter.upTo": "(up to {max})",
+    "prompter.alone": "(alone)",
+    "prompter.other": "Other…",
+    "prompter.addAnother": "Add another value (max {max})",
+    "prompter.removeValue": "Remove this value",
+    "prompter.qualifiedName": "Qualified name",
+    "prompter.list": "List",
+    "prompter.depNotSatisfiedMsg": "{msgId}: dependency between {names} not satisfied ({met} of {total} conditions met)",
+    "prompter.depNotSatisfied": "Dependency between {names} not satisfied ({met} of {total} conditions met)",
+    "prompter.errorSummary": "{count} error(s): {first}",
+    "prompter.moreErrors": " …",
+    // Main UI
+    "main.connect": "Connect",
+    "main.disconnect": "Disconnect",
+    "main.runSelected": "Run Selected",
+    "main.runAll": "Run All",
+    "main.runFrom": "Run From Selected",
+    "main.cancel": "Cancel",
+    "main.prompt": "Prompt",
+    "main.messages": "Messages",
+    "main.results": "Results",
+    "main.savedConnections": "Saved connections",
+    // Main UI — tabs, badges, titles
+    "main.connected": "Connected",
+    "main.notConnected": "Not connected",
+    "main.closeTab": "Close tab",
+    "main.closePrompter": "Close prompter",
+    "main.detachToWindow": "Detach to its own window",
+    "main.detachFailed": "Detach failed: {message}",
+    "main.detachedWindowTitle": "{label} — IBM i Run SQL",
+    "main.detachedWindow": "Detached window",
+    "main.detached": "Detached",
+    "main.detachedBadge": "{label} (detached)",
+    "main.connection": "Connection",
+    "main.connectionN": "Connection {n}",
+    "main.promptTitle": "Prompt: {name}",
+    // Main UI — status line
+    "main.running": "Running...",
+    "main.runningStatements": "Running {count} statements...",
+    "main.runningStatementsFromCursor": "Running {count} statements from cursor...",
+    "main.runningStatementOf": "Running statement {current} of {total}...",
+    "main.statementsCompleted": "{count} statements completed.",
+    "main.error": "Error",
+    "main.row": "row",
+    "main.rows": "rows",
+    "main.moreAvailable": " (more available)",
+    "main.elapsedIn": " in {ms} ms",
+    "main.affected": "affected",
+    "main.statementCompleted": "Statement completed",
+    "main.completed": "Completed",
+    "main.ok": "OK",
+    "main.failed": "failed",
+    "main.clCommandFailed": "CL command failed.",
+    // Main UI — messages/log panel
+    "main.logConnectedDetail": "Connected to relational database {product} on {host} as {user}{job} using JDBC driver '{driver}'",
+    "main.connectionFailed": "Connection failed: {message}",
+    "main.logRunSelected": "Run Selected...",
+    "main.logRunAllStatement": "Run All — statement {current} of {total}...",
+    "main.logRunFromStatement": "Run from Selected — statement {current} of {total}...",
+    "main.logCommandRan": "Command ran successfully   ({ms} ms)",
+    "main.logCommandFailed": "Command failed   ({ms} ms)",
+    "main.logStatementRan": "Statement ran successfully   ({ms} ms)",
+    "main.logStatementRanCount": "Statement ran successfully   ({ms} ms) — {count} row(s) affected",
+    "main.logStatementFailed": "Statement failed{state}   ({ms} ms)",
+    "main.statementRan": "Statement ran",
+    "main.statementFailed": "Statement failed",
+    "main.sqlState": "SQL State: {state}",
+    "main.sqlCode": ", SQL Code: {code}",
+    "main.sqlStateTag": "SQLState {state}",
+    "main.msgTypeSeverity": "Type: {type}  Severity: {severity}",
+    // Main UI — connect panel / saved connections
+    "main.enterHost": "Enter a host before saving.",
+    "main.forgetHost": "Forget {host}",
+    "main.moveToTop": "Move to top of list",
+    "main.savedHostItemTitle": "Click to fill form; right-click for options",
+    "main.noSavedConnections": "No saved connections yet — connect once and it will appear here.",
+    // Main UI — prompt flow
+    "main.noCommandInField": "No command found in field to prompt: \"{command}\"",
+    "main.promptPlaceCursor": "Place the cursor on a command line (e.g. CL: DSPLIBL) to prompt.",
+    "main.promptEnterCommand": "Enter a command name (e.g. DSPLIBL or CL: DSPLIBL) to prompt.",
+    // Static index.html markup (applied by applyL10nToStaticDom in main.ts)
+    "html.reattach": "Reattach",
+    "html.reattachTitle": "Close this window and keep the connection in the main window",
+    "html.newConnTitle": "New connection tab",
+    "html.hostPlaceholder": "my.ibmi.host",
+    "html.schemaPlaceholder": "(optional)",
+    "html.runTitle": "Run Selected (statement at cursor; Cmd/Ctrl+Enter)",
+    "html.runAllTitle": "Run All (every statement, first to last)",
+    "html.runFromTitle": "Run from Selected (cursor statement through the last)",
+    "html.cancelTitle": "Cancel running statement",
+    "html.promptTitle": "Prompt CL command (F4)",
+    "html.splitterTitle": "Drag to resize",
+    "html.loadMore": "Load more",
+    "html.loadAll": "Load all",
+};
+
+const CATALOGS: Record<string, () => Catalog> = {
+    en: () => en,
+    // fr: () => fr,  // add languages here as catalogs land
+};
+
+let active: Catalog = en;
+
+const lang = (typeof navigator !== "undefined" ? navigator.language : "en") ?? "en";
+const short = lang.split("-")[0].toLowerCase();
+if (short !== "en" && CATALOGS[short]) {
+    active = { ...en, ...CATALOGS[short]() };
+}
+
+/** Translate key; falls back to the provided English text, then the key. */
+export function t(key: string, fallback: string): string {
+    return active[key] ?? fallback;
+}

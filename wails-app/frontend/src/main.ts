@@ -21,6 +21,7 @@ import {
 import { splitStatements, statementAt, statementsFrom } from "./statements";
 import { parseCmdXml } from "./clprompter/prompterModel";
 import { showPrompter } from "./clprompter/prompterView";
+import { t } from "./l10n";
 
 function el<T extends HTMLElement>(id: string): T {
     const node = document.getElementById(id);
@@ -52,6 +53,43 @@ const els = {
     btnLoadMore: el<HTMLButtonElement>("btn-load-more"),
     btnLoadAll: el<HTMLButtonElement>("btn-load-all"),
 };
+
+// Static index.html strings: the English markup is the fallback/pre-JS paint;
+// overwrite textContent/title/placeholder from the catalog once at boot.
+// Only elements that have ids in index.html are handled here.
+function applyL10nToStaticDom(): void {
+    const setText = (id: string, value: string) => {
+        const node = document.getElementById(id);
+        if (node) node.textContent = value;
+    };
+    const setTitle = (id: string, value: string) => {
+        const node = document.getElementById(id);
+        if (node) node.title = value;
+    };
+    const setPlaceholder = (id: string, value: string) => {
+        const node = document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement | null;
+        if (node) node.placeholder = value;
+    };
+    setText("btn-reattach", t("html.reattach", "Reattach"));
+    setTitle("btn-reattach", t("html.reattachTitle", "Close this window and keep the connection in the main window"));
+    setText("btn-connect", t("main.connect", "Connect"));
+    setText("btn-disconnect", t("main.disconnect", "Disconnect"));
+    setTitle("btn-new-conn", t("html.newConnTitle", "New connection tab"));
+    setPlaceholder("in-host", t("html.hostPlaceholder", "my.ibmi.host"));
+    setPlaceholder("in-schema", t("html.schemaPlaceholder", "(optional)"));
+    setTitle("btn-saved-hosts", t("main.savedConnections", "Saved connections"));
+    setTitle("btn-run", t("html.runTitle", "Run Selected (statement at cursor; Cmd/Ctrl+Enter)"));
+    setTitle("btn-run-all", t("html.runAllTitle", "Run All (every statement, first to last)"));
+    setTitle("btn-run-from", t("html.runFromTitle", "Run from Selected (cursor statement through the last)"));
+    setText("btn-cancel", t("main.cancel", "Cancel"));
+    setTitle("btn-cancel", t("html.cancelTitle", "Cancel running statement"));
+    setText("btn-prompt", t("main.prompt", "Prompt"));
+    setTitle("btn-prompt", t("html.promptTitle", "Prompt CL command (F4)"));
+    setTitle("splitter", t("html.splitterTitle", "Drag to resize"));
+    setText("btn-load-more", t("html.loadMore", "Load more"));
+    setText("btn-load-all", t("html.loadAll", "Load all"));
+}
+applyL10nToStaticDom();
 
 // --- Work-area panes (bottom tabs): results, messages, dynamic prompter panes ---
 let activePane = "results";
@@ -120,7 +158,7 @@ function openPrompterPane(label: string): { pane: HTMLElement; close: () => void
     const close = document.createElement("span");
     close.className = "work-tab-close";
     close.textContent = "\u00D7";
-    close.title = "Close prompter";
+    close.title = t("main.closePrompter", "Close prompter");
     tab.appendChild(close);
     els.workTabs.insertBefore(tab, els.workTabs.querySelector(".spacer"));
 
@@ -206,13 +244,13 @@ function renderTabs(): void {
         const btn = document.createElement("button");
         btn.className = "conn-tab" + (tab.key === activeTabKey ? " active" : "");
         btn.textContent = tab.label;
-        btn.title = tab.connectionId ? "Connected" : "Not connected";
+        btn.title = tab.connectionId ? t("main.connected", "Connected") : t("main.notConnected", "Not connected");
         btn.addEventListener("click", () => switchTab(tab.key));
         if (tab.connectionId) {
             const detach = document.createElement("span");
             detach.className = "conn-tab-detach";
             detach.textContent = "\u2197"; // arrow out
-            detach.title = "Detach to its own window";
+            detach.title = t("main.detachToWindow", "Detach to its own window");
             detach.addEventListener("click", (ev) => {
                 ev.stopPropagation();
                 void detachTab(tab);
@@ -222,7 +260,7 @@ function renderTabs(): void {
         const close = document.createElement("span");
         close.className = "conn-tab-close";
         close.textContent = "\u00D7";
-        close.title = "Close tab";
+        close.title = t("main.closeTab", "Close tab");
         close.addEventListener("click", (ev) => {
             ev.stopPropagation();
             void closeTab(tab.key);
@@ -237,9 +275,9 @@ async function detachTab(tab: ConnectionTab): Promise<void> {
     if (!tab.connectionId) return;
     const app = App();
     try {
-        await app.DetachConnection(tab.connectionId, `${tab.label} — IBM i Run SQL`);
+        await app.DetachConnection(tab.connectionId, t("main.detachedWindowTitle", "{label} — IBM i Run SQL").replace("{label}", tab.label));
     } catch (err) {
-        showMessages([], `Detach failed: ${String((err as Error)?.message ?? err)}`);
+        showMessages([], t("main.detachFailed", "Detach failed: {message}").replace("{message}", String((err as Error)?.message ?? err)));
         return;
     }
     // The window owns the connection now; drop the tab locally (no disconnect).
@@ -329,7 +367,7 @@ function addTab(): ConnectionTab {
     tabCounter += 1;
     const tab: ConnectionTab = {
         key: `tab-${tabCounter}`,
-        label: `Connection ${tabCounter}`,
+        label: t("main.connectionN", "Connection {n}").replace("{n}", String(tabCounter)),
         connectionId: null,
         cursorId: null,
         hasCursor: false,
@@ -358,7 +396,7 @@ async function addDetachedTab(connectionId: string): Promise<void> {
     } catch {
         // workspace gone: keep the bare tab
     }
-    tab.label = ws.label ?? "Connection";
+    tab.label = ws.label ?? t("main.connection", "Connection");
     const showingResults = !!ws.showingResults && !!ws.columns;
     tab.snapshot = {
         editorText: ws.editorText ?? "",
@@ -430,7 +468,7 @@ let connectAttempted = false;
 function syncConnectionUi(): void {
     const tab = activeTab();
     const connected = !!tab?.connectionId;
-    els.badge.textContent = connected ? tab!.label : "Not connected";
+    els.badge.textContent = connected ? tab!.label : t("main.notConnected", "Not connected");
     els.badge.className = `badge ${connected ? "connected" : "disconnected"}`;
     els.btnConnect.disabled = connected;
     els.btnDisconnect.disabled = !connected;
@@ -473,8 +511,13 @@ function setConnected(info: ConnectResponse): void {
     els.sqlInput.focus();
     // ACS-style connection log line.
     const job = info.serverJob ? ` - ${info.serverJob}` : "";
-    appendLogLine(`[ ${nowStamp()} ]  ${info.user}@${info.host} Connected`, "msg-action");
-    appendLogLine(`Connected to relational database ${info.databaseProduct} on ${info.host} as ${info.user}${job} using JDBC driver '${info.driverName} ${info.driverVersion}'`, "msg-info", true);
+    appendLogLine(`[ ${nowStamp()} ]  ${info.user}@${info.host} ${t("main.connected", "Connected")}`, "msg-action");
+    appendLogLine(t("main.logConnectedDetail", "Connected to relational database {product} on {host} as {user}{job} using JDBC driver '{driver}'")
+        .replace("{product}", info.databaseProduct)
+        .replace("{host}", info.host)
+        .replace("{user}", info.user)
+        .replace("{job}", job)
+        .replace("{driver}", `${info.driverName} ${info.driverVersion}`), "msg-info", true);
 }
 
 function setDisconnected(): void {
@@ -483,7 +526,7 @@ function setDisconnected(): void {
         tab.connectionId = null;
         tab.cursorId = null;
         tab.hasCursor = false;
-        tab.label = `Connection ${tabs.indexOf(tab) + 1}`;
+        tab.label = t("main.connectionN", "Connection {n}").replace("{n}", String(tabs.indexOf(tab) + 1));
     }
     state.cursorId = null;
     state.more = false;
@@ -535,7 +578,7 @@ function logExecution(action: string, statement: string, outcome: string): void 
     for (const line of statement.split("\n")) {
         appendLogLine(line, "msg-statement", true);
     }
-    appendLogLine(outcome, outcome.startsWith("Statement ran") || outcome.includes("OK") ? "msg-info" : "msg-warning", true);
+    appendLogLine(outcome, outcome.startsWith(t("main.statementRan", "Statement ran")) || outcome.includes(t("main.ok", "OK")) ? "msg-info" : "msg-warning", true);
 }
 
 function showMessages(items: DisplayMessage[] | undefined, failure?: string): void {
@@ -555,7 +598,10 @@ function showMessages(items: DisplayMessage[] | undefined, failure?: string): vo
         const idPart = m.id
             ? m.id
             : m.sqlState
-                ? `SQL State: ${m.sqlState}${m.vendorCode != null && m.vendorCode !== 0 ? `, SQL Code: ${m.vendorCode}` : ""}`
+                ? t("main.sqlState", "SQL State: {state}").replace("{state}", m.sqlState) +
+                (m.vendorCode != null && m.vendorCode !== 0
+                    ? t("main.sqlCode", ", SQL Code: {code}").replace("{code}", String(m.vendorCode))
+                    : "")
                 : "";
         const textPart = m.text || m.message || "";
         const sevPart = m.severity != null && m.typeName ? ` [${m.typeName} ${m.severity}]` : "";
@@ -573,7 +619,7 @@ function showMessages(items: DisplayMessage[] | undefined, failure?: string): vo
         // form; if a messages entry already carries that text, drop the duplicate.
         if (failure && textPart && failure.includes(textPart)) coveredFailure = true;
         const tip: string[] = [];
-        if (m.typeName) tip.push(`Type: ${m.typeName}  Severity: ${m.severity}`);
+        if (m.typeName) tip.push(t("main.msgTypeSeverity", "Type: {type}  Severity: {severity}").replace("{type}", m.typeName).replace("{severity}", String(m.severity)));
         if (m.secondLevelText) tip.push(m.secondLevelText);
         if (tip.length) li.title = tip.join("\n\n");
         if (m.secondLevelText) {
@@ -687,17 +733,18 @@ function renderTable(): void {
 }
 
 function updateStatus(kind: string, result: SqlResult | undefined, totalRows: number): void {
-    const elapsed = result?.elapsedMs != null ? ` in ${result.elapsedMs} ms` : "";
+    const elapsed = result?.elapsedMs != null ? t("main.elapsedIn", " in {ms} ms").replace("{ms}", String(result.elapsedMs)) : "";
+    const rowWord = (n: number) => (n === 1 ? t("main.row", "row") : t("main.rows", "rows"));
     if (kind === "rows") {
-        const moreText = state.more ? " (more available)" : "";
-        els.statusText.textContent = `${totalRows} row${totalRows === 1 ? "" : "s"}${moreText}${elapsed}`;
+        const moreText = state.more ? t("main.moreAvailable", " (more available)") : "";
+        els.statusText.textContent = `${totalRows} ${rowWord(totalRows)}${moreText}${elapsed}`;
     } else if (kind === "count") {
         const n = result?.updateCount ?? 0;
-        els.statusText.textContent = `${n} row${n === 1 ? "" : "s"} affected${elapsed}`;
+        els.statusText.textContent = `${n} ${rowWord(n)} ${t("main.affected", "affected")}${elapsed}`;
     } else if (kind === "none") {
-        els.statusText.textContent = `Statement completed${elapsed}`;
+        els.statusText.textContent = `${t("main.statementCompleted", "Statement completed")}${elapsed}`;
     } else {
-        els.statusText.textContent = elapsed ? `Completed${elapsed}` : "";
+        els.statusText.textContent = elapsed ? `${t("main.completed", "Completed")}${elapsed}` : "";
     }
     els.btnLoadMore.hidden = !state.more;
     els.btnLoadAll.hidden = !state.more;
@@ -714,8 +761,8 @@ function showSqlResult(result: SqlResult): void {
         banner.className = "result-error";
         const first = result.messages?.[0];
         banner.textContent = first
-            ? `SQL State: ${first.sqlState}${first.vendorCode ? `, SQL Code: ${first.vendorCode}` : ""}: ${first.message}`
-            : result.error ?? "Statement failed";
+            ? `${t("main.sqlState", "SQL State: {state}").replace("{state}", String(first.sqlState))}${first.vendorCode ? t("main.sqlCode", ", SQL Code: {code}").replace("{code}", String(first.vendorCode)) : ""}: ${first.message}`
+            : result.error ?? t("main.statementFailed", "Statement failed");
         els.resultBody.appendChild(banner);
         if (!activePane.startsWith("prompter-")) showPane("results");
         return;
@@ -748,8 +795,8 @@ function showCLResult(result: CLResult): void {
     state.more = false;
     els.resultHead.innerHTML = "";
     els.resultBody.innerHTML = "";
-    showMessages(result.messages, result.ok ? undefined : "CL command failed.");
-    els.statusText.textContent = `CL: ${result.command} — ${result.ok ? "OK" : "failed"} in ${result.elapsedMs} ms`;
+    showMessages(result.messages, result.ok ? undefined : t("main.clCommandFailed", "CL command failed."));
+    els.statusText.textContent = `CL: ${result.command} — ${result.ok ? t("main.ok", "OK") : t("main.failed", "failed")}${t("main.elapsedIn", " in {ms} ms").replace("{ms}", String(result.elapsedMs))}`;
     els.btnLoadMore.hidden = true;
     els.btnLoadAll.hidden = true;
 }
@@ -779,8 +826,8 @@ async function doConnect(): Promise<void> {
         els.connectError.textContent = String((err as Error)?.message ?? err);
         els.connectError.hidden = false;
         // Connect failures must be visible: open Messages with the error.
-        appendLogLine(`[ ${nowStamp()} ]  Connect`, "msg-action");
-        appendLogLine(`Connection failed: ${String((err as Error)?.message ?? err)}`, "msg-error", true);
+        appendLogLine(`[ ${nowStamp()} ]  ${t("main.connect", "Connect")}`, "msg-action");
+        appendLogLine(t("main.connectionFailed", "Connection failed: {message}").replace("{message}", String((err as Error)?.message ?? err)), "msg-error", true);
         showPane("messages");
     }
 }
@@ -846,7 +893,7 @@ async function saveProfile(): Promise<void> {
     if (!app) return;
     const p = formProfile();
     if (!p.host) {
-        els.connectError.textContent = "Enter a host before saving.";
+        els.connectError.textContent = t("main.enterHost", "Enter a host before saving.");
         els.connectError.hidden = false;
         return;
     }
@@ -888,7 +935,7 @@ async function doDisconnect(): Promise<void> {
 
 // Execute one statement text on the active tab; shared by all run modes.
 // actionLabel is the ACS-style verb for the log ("Run Selected...", etc.).
-async function runOne(text: string, actionLabel = "Run Selected..."): Promise<void> {
+async function runOne(text: string, actionLabel = t("main.logRunSelected", "Run Selected...")): Promise<void> {
     const app = App();
     if (!app || !activeTab()?.connectionId) return;
     state.sortCol = -1;
@@ -913,27 +960,27 @@ async function runOne(text: string, actionLabel = "Run Selected..."): Promise<vo
         if ((result as CLResult).kind === "cl") {
             const cl = result as CLResult;
             logExecution(actionLabel, text,
-                cl.ok ? `Command ran successfully   (${cl.elapsedMs} ms)`
-                    : `Command failed   (${cl.elapsedMs} ms)`);
+                cl.ok ? t("main.logCommandRan", "Command ran successfully   ({ms} ms)").replace("{ms}", String(cl.elapsedMs))
+                    : t("main.logCommandFailed", "Command failed   ({ms} ms)").replace("{ms}", String(cl.elapsedMs)));
             showCLResult(cl);
         } else {
             const sqlResult = result as SqlResult;
             if (sqlResult.kind === "error") {
-                const stateText = sqlResult.messages?.[0]?.sqlState ? `  SQLState ${sqlResult.messages[0].sqlState}` : "";
-                logExecution(actionLabel, text, `Statement failed${stateText}   (${sqlResult.elapsedMs ?? elapsed} ms)`);
+                const stateText = sqlResult.messages?.[0]?.sqlState ? `  ${t("main.sqlStateTag", "SQLState {state}").replace("{state}", sqlResult.messages[0].sqlState!)}` : "";
+                logExecution(actionLabel, text, t("main.logStatementFailed", "Statement failed{state}   ({ms} ms)").replace("{state}", stateText).replace("{ms}", String(sqlResult.elapsedMs ?? elapsed)));
             } else if (sqlResult.kind === "count") {
-                logExecution(actionLabel, text, `Statement ran successfully   (${sqlResult.elapsedMs ?? elapsed} ms) — ${sqlResult.updateCount} row(s) affected`);
+                logExecution(actionLabel, text, t("main.logStatementRanCount", "Statement ran successfully   ({ms} ms) — {count} row(s) affected").replace("{ms}", String(sqlResult.elapsedMs ?? elapsed)).replace("{count}", String(sqlResult.updateCount)));
             } else {
-                logExecution(actionLabel, text, `Statement ran successfully   (${sqlResult.elapsedMs ?? elapsed} ms)`);
+                logExecution(actionLabel, text, t("main.logStatementRan", "Statement ran successfully   ({ms} ms)").replace("{ms}", String(sqlResult.elapsedMs ?? elapsed)));
             }
             state.rows = sqlResult.kind === "rows" ? sqlResult.rows ?? [] : [];
             showSqlResult(sqlResult);
         }
     } catch (err) {
         const elapsed = Math.round(performance.now() - started);
-        logExecution(actionLabel, text, `Statement failed   (${elapsed} ms)`);
+        logExecution(actionLabel, text, t("main.logStatementFailed", "Statement failed{state}   ({ms} ms)").replace("{state}", "").replace("{ms}", String(elapsed)));
         showMessages([], String((err as Error)?.message ?? err));
-        els.statusText.textContent = "Error";
+        els.statusText.textContent = t("main.error", "Error");
         throw err;
     }
 }
@@ -962,9 +1009,9 @@ async function doRun(): Promise<void> {
     }
     if (!text) return;
     setRunning(true);
-    els.statusText.textContent = "Running...";
+    els.statusText.textContent = t("main.running", "Running...");
     try {
-        await runOne(text, "Run Selected...");
+        await runOne(text, t("main.logRunSelected", "Run Selected..."));
     } finally {
         setRunning(false);
     }
@@ -977,13 +1024,13 @@ async function doRunAll(): Promise<void> {
     if (!stmts.length) return;
     clearMessages();
     setRunning(true);
-    els.statusText.textContent = `Running ${stmts.length} statements...`;
+    els.statusText.textContent = t("main.runningStatements", "Running {count} statements...").replace("{count}", String(stmts.length));
     try {
         for (let i = 0; i < stmts.length; i += 1) {
-            els.statusText.textContent = `Running statement ${i + 1} of ${stmts.length}...`;
-            await runOne(stmts[i].text, `Run All — statement ${i + 1} of ${stmts.length}...`);
+            els.statusText.textContent = t("main.runningStatementOf", "Running statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
+            await runOne(stmts[i].text, t("main.logRunAllStatement", "Run All — statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length)));
         }
-        els.statusText.textContent = `${stmts.length} statements completed.`;
+        els.statusText.textContent = t("main.statementsCompleted", "{count} statements completed.").replace("{count}", String(stmts.length));
     } catch {
         // runOne already surfaced the error; stop the batch.
     } finally {
@@ -1000,13 +1047,13 @@ async function doRunFromSelected(): Promise<void> {
     if (!stmts.length) return;
     clearMessages();
     setRunning(true);
-    els.statusText.textContent = `Running ${stmts.length} statements from cursor...`;
+    els.statusText.textContent = t("main.runningStatementsFromCursor", "Running {count} statements from cursor...").replace("{count}", String(stmts.length));
     try {
         for (let i = 0; i < stmts.length; i += 1) {
-            els.statusText.textContent = `Running statement ${i + 1} of ${stmts.length}...`;
-            await runOne(stmts[i].text, `Run from Selected — statement ${i + 1} of ${stmts.length}...`);
+            els.statusText.textContent = t("main.runningStatementOf", "Running statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
+            await runOne(stmts[i].text, t("main.logRunFromStatement", "Run from Selected — statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length)));
         }
-        els.statusText.textContent = `${stmts.length} statements completed.`;
+        els.statusText.textContent = t("main.statementsCompleted", "{count} statements completed.").replace("{count}", String(stmts.length));
     } catch {
         // stop batch on failure
     } finally {
@@ -1081,7 +1128,7 @@ async function openCommandPrompter(
     });
     const descriptor = parseCmdXml(result.xml);
     if (!descriptor.name) descriptor.name = ref.command;
-    const { pane, close } = openPrompterPane(`Prompt: ${descriptor.name}`);
+    const { pane, close } = openPrompterPane(t("main.promptTitle", "Prompt: {name}").replace("{name}", descriptor.name));
     showPrompter(pane, descriptor, ref.command, {
         onRun: (commandText) => {
             close();
@@ -1100,7 +1147,7 @@ async function openCommandPrompter(
 function promptNestedRecursively(commandText: string, applyBack: (t: string) => void): void {
     const nestedRef = extractCommandRef(commandText);
     if (!nestedRef) {
-        showMessages([], `No command found in field to prompt: "${commandText}"`);
+        showMessages([], t("main.noCommandInField", "No command found in field to prompt: \"{command}\"").replace("{command}", commandText));
         return;
     }
     void openCommandPrompter(
@@ -1114,21 +1161,50 @@ function promptNestedRecursively(commandText: string, applyBack: (t: string) => 
 async function doPrompt(): Promise<void> {
     const app = App();
     if (!app || !activeTab()?.connectionId) return;
-    const ref = extractCommandRef(els.sqlInput.value);
+    // Prompt the statement under the caret (or the selection), exactly like
+    // Run Selected — a leading `CL:` prefix is stripped by extractCommandRef.
+    const src = els.sqlInput.value;
+    const selStart = els.sqlInput.selectionStart ?? 0;
+    const selEnd = els.sqlInput.selectionEnd ?? 0;
+    let text: string;
+    let replaceFrom: number;
+    let replaceTo: number;
+    if (selEnd > selStart) {
+        text = src.slice(selStart, selEnd).trim();
+        const lead = src.slice(selStart, selEnd).length - src.slice(selStart, selEnd).trimStart().length;
+        replaceFrom = selStart + lead;
+        replaceTo = replaceFrom + text.length;
+    } else {
+        const stmt = statementAt(src, selStart);
+        if (!stmt) {
+            showMessages([], t("main.promptPlaceCursor", "Place the cursor on a command line (e.g. CL: DSPLIBL) to prompt."));
+            return;
+        }
+        text = stmt.text;
+        replaceFrom = stmt.start;
+        replaceTo = stmt.end;
+    }
+    const ref = extractCommandRef(text);
     if (!ref) {
-        showMessages([], "Enter a command name (e.g. DSPLIBL or CL: DSPLIBL) to prompt.");
+        showMessages([], t("main.promptEnterCommand", "Enter a command name (e.g. DSPLIBL or CL: DSPLIBL) to prompt."));
         return;
     }
     els.btnPrompt.disabled = true;
     try {
+        // Replace only the prompted statement span — the rest of the buffer
+        // (other SQL/CL statements) must survive Insert/Run.
+        const replaceSpan = (newText: string) => {
+            const cur = els.sqlInput.value;
+            els.sqlInput.value = `${cur.slice(0, replaceFrom)}CL: ${newText}${cur.slice(replaceTo)}`;
+            els.sqlInput.focus();
+            els.sqlInput.selectionStart = replaceFrom;
+            els.sqlInput.selectionEnd = replaceFrom + newText.length + 4;
+        };
         await openCommandPrompter(
             ref,
+            (text) => replaceSpan(text),
             (text) => {
-                els.sqlInput.value = `CL: ${text}`;
-                els.sqlInput.focus();
-            },
-            (text) => {
-                els.sqlInput.value = `CL: ${text}`;
+                replaceSpan(text);
                 void doRun();
             },
             // Nested: prompt the command typed into a CMD/CMDSTR field.
@@ -1198,8 +1274,8 @@ function showProfileContextMenu(p: ConnectionProfile, x: number, y: number): voi
         menu.appendChild(item);
     };
 
-    addItem(`Forget ${p.host}`, () => void forgetProfileByName(p.name), true);
-    addItem("Move to top of list", () => void bumpProfile(p.name));
+    addItem(t("main.forgetHost", "Forget {host}").replace("{host}", p.host), () => void forgetProfileByName(p.name), true);
+    addItem(t("main.moveToTop", "Move to top of list"), () => void bumpProfile(p.name));
 
     document.body.appendChild(menu);
     contextMenuEl = menu;
@@ -1257,7 +1333,7 @@ function toggleSavedHosts(): void {
         item.className = "combo-item";
         item.dataset.profileName = p.name;
         item.textContent = `${p.host} — ${p.user}${p.tls ? " (TLS)" : ""}${p.defaultSchema ? ` [${p.defaultSchema}]` : ""}`;
-        item.title = "Click to fill form; right-click for options";
+        item.title = t("main.savedHostItemTitle", "Click to fill form; right-click for options");
         item.addEventListener("click", () => {
             fillFormFromProfile(p);
             popup.hidden = true;
@@ -1267,7 +1343,7 @@ function toggleSavedHosts(): void {
     if (profiles.length === 0) {
         const empty = document.createElement("div");
         empty.className = "combo-item combo-empty";
-        empty.textContent = "No saved connections yet — connect once and it will appear here.";
+        empty.textContent = t("main.noSavedConnections", "No saved connections yet — connect once and it will appear here.");
         popup.appendChild(empty);
     } else {
         const pinnedCount = profiles.filter((p) => (p.pinnedAt ?? 0) > 0).length;
@@ -1357,7 +1433,7 @@ if (detachedConnId) {
     els.connectPanel.hidden = true;
     const tab: ConnectionTab = {
         key: "detached",
-        label: "Detached",
+        label: t("main.detached", "Detached"),
         connectionId: detachedConnId,
         cursorId: null,
         hasCursor: false,
@@ -1367,7 +1443,7 @@ if (detachedConnId) {
     // Set all buttons consistently from the tab's connected state (Connect
     // disabled, Disconnect enabled, Run/Prompt enabled).
     syncConnectionUi();
-    els.badge.textContent = "Detached window";
+    els.badge.textContent = t("main.detachedWindow", "Detached window");
     els.badge.className = "badge connected";
     const btnReattach = el<HTMLButtonElement>("btn-reattach");
     btnReattach.hidden = false;
@@ -1386,7 +1462,7 @@ if (detachedConnId) {
     const applyWorkspace = (ws: WorkspaceMirror): void => {
         if (ws.label) {
             tab.label = ws.label;
-            els.badge.textContent = ws.label + " (detached)";
+            els.badge.textContent = t("main.detachedBadge", "{label} (detached)").replace("{label}", ws.label);
         }
         if (typeof ws.editorText === "string" && ws.editorText !== els.sqlInput.value) {
             els.sqlInput.value = ws.editorText;
