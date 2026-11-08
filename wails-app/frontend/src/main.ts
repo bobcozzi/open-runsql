@@ -190,8 +190,8 @@ export function renderSpoolText(raw: string): { lines: string[]; pageCount: numb
                 if (scs >= 0x41 && scs <= 0x7A && text) text = seg;
                 text = text.replace(/[\u0000-\u001F\u0080-\u009F]/g, "");
                 if (!text) continue;          // pure positioning segment
-                const col = scs >= 0x80 ? scs - 106 : scs - 1;
-                if (col > cur.length && col <= 120) {
+                const col = scs >= 0x80 ? scs - 99 : scs - 1;
+                if (col > cur.length && col <= 130) {
                     cur += " ".repeat(col - cur.length);
                 } else if (cur && !cur.endsWith(" ")) {
                     cur += " ";
