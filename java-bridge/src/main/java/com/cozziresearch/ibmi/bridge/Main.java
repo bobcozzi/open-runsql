@@ -405,7 +405,10 @@ public final class Main {
                 long mult = splfLong(() -> f.getIntegerAttribute(PrintObject.ATTR_SPLF_SIZE_MULT));
                 file.put("size", splfLong(() -> f.getIntegerAttribute(PrintObject.ATTR_SPLF_SIZE))
                         * (mult > 0 ? mult : 1));
-                file.put("status", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_SPLFSTATUS)));
+                // Status values arrive as *READY/*HELD/etc. — drop the leading
+                // asterisk for display (READY, HELD, OPEN, CLOSED).
+                String status = splfStr(() -> f.getStringAttribute(PrintObject.ATTR_SPLFSTATUS));
+                file.put("status", status.startsWith("*") ? status.substring(1) : status);
                 file.put("holdStatus", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_HOLD)));
                 files.add(file);
             }
@@ -578,6 +581,19 @@ public final class Main {
                 try (PrintObjectTransformedInputStream in = f.getTransformedInputStream(p)) {
                     bytes = in.readAllBytes();
                 }
+            } else if ("raw".equalsIgnoreCase(format)) {
+                // Raw page-stream bytes, no CCSID decode — for SCS debugging.
+                java.io.ByteArrayOutputStream rawBytes = new java.io.ByteArrayOutputStream();
+                try (PrintObjectPageInputStream in = f.getPageInputStream(new PrintParameterList())) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    do {
+                        while ((n = in.read(buf)) > 0) {
+                            rawBytes.write(buf, 0, n);
+                        }
+                    } while (in.nextPage());
+                }
+                bytes = rawBytes.toByteArray();
             } else {
                 // Page stream: decoded text + per-record SCS column framing.
                 // Decode with the spooled file's job CCSID (EBCDIC 037 etc.)

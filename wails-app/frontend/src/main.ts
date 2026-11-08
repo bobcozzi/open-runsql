@@ -182,8 +182,48 @@ function legacyCopy(text: string): void {
  * (high-bit bytes are the stream's offset form: byte-106). Column moves pad
  * with blanks; pure-positioning segments are dropped. Returns { lines,
  * pageCount }. */
+/** Render the spooled page stream to display text. Two record forms:
+ *  - SCS Presentation Position: "\x34\xC0<col>" (absolute 1-based column) with
+ *    "\x15"/"\x25" line feeds and "\x0C" page ejects (EBCDIC report files).
+ *  - "\u0094{<col>}" per-record framing (the other page-stream variant).
+ * Plain line-data (neither marker) passes through. Returns { lines, pageCount }. */
 export function renderSpoolText(raw: string): { lines: string[]; pageCount: number } {
     const lines: string[] = [];
+    let pageCount = 1;
+    // SCS Presentation Position stream: \x34\xC0<col> records.
+    if (raw.includes("\x34\xC0")) {
+        let cur = "";
+        let i = 0;
+        const n = raw.length;
+        const flush = (push: boolean) => {
+            const s = cur.replace(/\s+$/, "");
+            if (push || s) lines.push(s);
+            cur = "";
+        };
+        while (i < n) {
+            const b = raw.charCodeAt(i);
+            if (b === 0x00) { i++; continue; }
+            if (b === 0x0C) { flush(false); pageCount++; lines.push("\f"); i++; continue; }
+            if (b === 0x15 || b === 0x25 || b === 0x06) { flush(true); i++; continue; }
+            if (b === 0x34 && i + 2 < n) {
+                const cmd = raw.charCodeAt(i + 1);
+                const col = raw.charCodeAt(i + 2);
+                if (cmd === 0xC0 || cmd === 0xC1) {
+                    // Absolute column; pad forward. Backward = overstrike -> keep 1 space.
+                    if (col > cur.length) cur += " ".repeat(col - cur.length);
+                    else if (cur && !cur.endsWith(" ")) cur += " ";
+                }
+                i += 3;
+                continue;
+            }
+            if (b === 0x34 && i + 1 < n) { i += 3; continue; }   // other 0x34 cmd
+            if (b < 0x20 && b !== 0x09) { i++; continue; }        // other SCS
+            cur += raw[i];
+            i++;
+        }
+        flush(false);
+        return { lines, pageCount };
+    }
     for (const page of raw.split("\f")) {
         // Page-start PRTCTL Set Mode triple (\u0094 0x44 0x01); a bare \u0094
         // elsewhere is a high-column byte, so strip only that exact triple.
@@ -317,18 +357,34 @@ async function viewSpooledFile(f: SpooledFileInfo): Promise<void> {
         const title = document.createElement("span");
         title.className = "spool-viewer-title";
         title.textContent = `${f.name}  ${f.jobNumber}/${f.jobUser}/${f.jobName}`;
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "btn spool-copy-btn";
+        copyBtn.title = t("spool.copyTitle", "Copy to clipboard");
+        copyBtn.textContent = "⧉";
         const closeBtn = document.createElement("button");
         closeBtn.type = "button";
         closeBtn.className = "btn";
         closeBtn.textContent = t("spool.close", "Close");
         closeBtn.addEventListener("click", () => overlay.remove());
         head.appendChild(title);
+        head.appendChild(copyBtn);
         head.appendChild(closeBtn);
         const pre = document.createElement("pre");
         pre.className = "spool-viewer-content";
         // Clean SCS control bytes; keep line spacing and page breaks visible.
         pre.textContent = renderSpoolText(b64ToText(res.base64 ?? "")).lines
             .map((l) => (l === "\f" ? "\n" : l)).join("\n");
+        copyBtn.addEventListener("click", () => {
+            const text = pre.textContent ?? "";
+            const done = () => appendLogLine(t("spool.logCopied", "Copied to clipboard"), "msg-info", true);
+            if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(text).then(done).catch(() => { legacyCopy(text); done(); });
+            } else {
+                legacyCopy(text);
+                done();
+            }
+        });
         box.appendChild(head);
         box.appendChild(pre);
         overlay.appendChild(box);
@@ -337,6 +393,24 @@ async function viewSpooledFile(f: SpooledFileInfo): Promise<void> {
             if (ev.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", onEsc); }
         });
         document.body.appendChild(overlay);
+    } catch (err) {
+        showMessages([], String((err as Error)?.message ?? err));
+    }
+}
+
+/** Save the raw page-stream bytes (no rendering) to ~/Downloads for SCS
+ * debugging. format="raw" skips the bridge CCSID decode. */
+async function saveRawSpooledFile(f: SpooledFileInfo): Promise<void> {
+    const app = App();
+    const target = spoolTarget(f);
+    if (!app || !target) return;
+    appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logRaw", "Save raw {name}...").replace("{name}", f.name)}`, "msg-action");
+    try {
+        const res = await app.GetSpooledFileData({ ...target, format: "raw" });
+        const saved = await app.SaveSpooledFile(`${f.name.trim()}_${f.jobNumber.trim()}.raw`, res.base64 ?? "");
+        appendLogLine(t("spool.logSaved", "Saved to {path}").replace("{path}", saved), "msg-info", true);
+        els.statusText.textContent = t("spool.statusSaved", "Saved {path}").replace("{path}", saved);
+        await app.OpenSpooledFile(saved);
     } catch (err) {
         showMessages([], String((err as Error)?.message ?? err));
     }
@@ -569,6 +643,7 @@ function showSpoolContextMenu(f: SpooledFileInfo, x: number, y: number): void {
     });
     addItem(t("spool.act.dlPdf", "Download as PDF"), () => void downloadSpooledFile(f, "pdf"));
     addItem(t("spool.act.dlText", "Download as Text"), () => void downloadSpooledFile(f, "text"));
+    addItem(t("spool.act.saveRaw", "Save Raw"), () => void saveRawSpooledFile(f));
     addItem(t("spool.act.print", "Print locally"), () => void printSpooledFile(f));
     sep();
     addItem(t("spool.act.move", "Move..."), () => moveSpooledFileDialog(f));
