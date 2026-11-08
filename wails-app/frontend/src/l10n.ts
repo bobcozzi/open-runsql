@@ -171,6 +171,8 @@ const en: Catalog = {
     "spool.logView": "View {name}...",
     "spool.logCopied": "Copied row to clipboard",
     "spool.moveTitle": "Move to Output Queue",
+    "spool.moveFile": "Spooled file:",
+    "spool.moveNumber": "Spooled File Nbr:",
     "spool.moveQueue": "Output queue:",
     "spool.moveLibrary": "Library:",
     "spool.moveHold": "Hold on output queue:",

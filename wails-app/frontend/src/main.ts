@@ -422,14 +422,24 @@ function moveSpooledFileDialog(f: SpooledFileInfo): void {
     const box = document.createElement("div");
     box.className = "spool-move-dialog";
     box.innerHTML = `<div class="spool-move-title">${t("spool.moveTitle", "Move to Output Queue")}</div>
+        <label>${t("spool.moveFile", "Spooled file:")}<input id="mv-file" type="text" readonly tabindex="-1" /></label>
+        <label>${t("spool.moveNumber", "Spooled File Nbr:")}<input id="mv-filenum" type="text" readonly tabindex="-1" /></label>
         <label>${t("spool.moveQueue", "Output queue:")}<input id="mv-outq" type="text" maxlength="10" autocapitalize="off" spellcheck="false" /></label>
         <label>${t("spool.moveLibrary", "Library:")}<input id="mv-outqlib" type="text" maxlength="10" autocapitalize="off" spellcheck="false" placeholder="*LIBL" /></label>
-        <label class="spool-move-hold">${t("spool.moveHold", "Hold on output queue:")}<select id="mv-hold" class="spool-move-holdfield"><option value="no" selected>*NO</option><option value="yes">*YES</option></select></label>
+        <label class="spool-move-hold">${t("spool.moveHold", "Hold on output queue:")}<select id="mv-hold" class="spool-move-holdfield"><option value="yes">*YES</option><option value="no" selected>*NO</option></select></label>
         <div class="spool-move-buttons">
             <span class="spool-f4-hint" id="mv-f4">${t("spool.moveSelect", "F4=List")}</span>
             <button type="button" id="mv-ok" class="btn primary">${t("spool.moveOk", "Move")}</button>
             <button type="button" id="mv-cancel" class="btn">${t("spool.moveCancel", "Cancel")}</button>
         </div>`;
+    // Read-only context: the file being moved + its current queue prefilled.
+    (box.querySelector("#mv-file") as HTMLInputElement).value = f.name.trim();
+    (box.querySelector("#mv-filenum") as HTMLInputElement).value = f.number.trim();
+    (box.querySelector("#mv-outq") as HTMLInputElement).value = f.outqName.trim();
+    (box.querySelector("#mv-outqlib") as HTMLInputElement).value = f.outqLib.trim();
+    // Reflect the file's current hold state in the Hold dropdown.
+    const held = /^(yes|\*yes|hld|held)/i.test(f.holdStatus.trim());
+    (box.querySelector("#mv-hold") as HTMLSelectElement).value = held ? "yes" : "no";
     overlay.appendChild(box);
     const close = () => overlay.remove();
     overlay.addEventListener("click", (ev) => { if (ev.target === overlay) close(); });

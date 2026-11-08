@@ -1109,6 +1109,12 @@ select.spool-move-holdfield {
     flex: 1;
 }
 
+.spool-move-dialog input[readonly] {
+    color: var(--fg-dim);
+    background: var(--bg-alt);
+    text-transform: none;
+}
+
 .spool-move-buttons {
     display: flex;
     gap: 8px;

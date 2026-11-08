@@ -496,12 +496,25 @@ public final class Main {
                         : toLib.trim().toUpperCase(Locale.ROOT);
                 String q = toQueue == null ? "" : toQueue.trim().toUpperCase(Locale.ROOT);
                 if (q.isEmpty()) throw new IllegalArgumentException("Target output queue is required");
-                if (holdFirst) f.hold("*IMMED");
                 com.ibm.as400.access.OutputQueue target =
                         new com.ibm.as400.access.OutputQueue(s.clSystem, "/QSYS.LIB/" + lib + ".LIB/" + q + ".OUTQ");
                 f.move(target);
+                if (holdFirst) {
+                    // Hold the file at its NEW location: re-find it on the
+                    // target queue (the pre-move handle is stale after move).
+                    com.ibm.as400.access.SpooledFileList dest = new com.ibm.as400.access.SpooledFileList(s.clSystem);
+                    try {
+                        dest.setUserFilter(jobUser == null || jobUser.isBlank() ? "*CURRENT"
+                                : jobUser.trim().toUpperCase(Locale.ROOT));
+                        dest.setQueueFilter("/QSYS.LIB/" + lib + ".LIB/" + q + ".OUTQ");
+                        SpooledFile moved = findSpooledFile(dest, name, number, jobName, jobUser, jobNumber);
+                        if (moved != null) moved.hold("*IMMED");
+                    } finally {
+                        try { dest.close(); } catch (Exception ignored) {}
+                    }
+                }
                 result.put("ok", true);
-                result.put("message", (holdFirst ? "Held and moved " : "Moved ") + name + " to " + lib + "/" + q);
+                result.put("message", (holdFirst ? "Moved and held " : "Moved ") + name + " to " + lib + "/" + q);
             }
         } finally {
             try { list.close(); } catch (Exception ignored) {}
