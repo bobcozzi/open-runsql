@@ -23,6 +23,7 @@ import { arrowRecallDirection, InputHistoryStore } from "./inputHistory";
 import { parseCmdXml } from "./clprompter/prompterModel";
 import { showPrompter } from "./clprompter/prompterView";
 import { buildSpooledFileRequest, createSpoolPane, type SpoolFilters } from "./spool";
+import { renderScsBytes } from "./scsRender";
 import type { SpooledFileInfo } from "./types";
 import { t } from "./l10n";
 
@@ -182,95 +183,12 @@ function legacyCopy(text: string): void {
  * (high-bit bytes are the stream's offset form: byte-106). Column moves pad
  * with blanks; pure-positioning segments are dropped. Returns { lines,
  * pageCount }. */
-/** Render the spooled page stream to display text. Two record forms:
- *  - SCS Presentation Position: "\x34\xC0<col>" (absolute 1-based column) with
- *    "\x15"/"\x25" line feeds and "\x0C" page ejects (EBCDIC report files).
- *  - "\u0094{<col>}" per-record framing (the other page-stream variant).
- * Plain line-data (neither marker) passes through. Returns { lines, pageCount }. */
-export function renderSpoolText(raw: string): { lines: string[]; pageCount: number } {
-    const lines: string[] = [];
-    let pageCount = 1;
-    // SCS Presentation Position stream: \x34\xC0<col> records.
-    if (raw.includes("\x34\xC0")) {
-        let cur = "";
-        let i = 0;
-        const n = raw.length;
-        const flush = (push: boolean) => {
-            const s = cur.replace(/\s+$/, "");
-            if (push || s) lines.push(s);
-            cur = "";
-        };
-        while (i < n) {
-            const b = raw.charCodeAt(i);
-            if (b === 0x00) { i++; continue; }
-            if (b === 0x0C) { flush(false); pageCount++; lines.push("\f"); i++; continue; }
-            if (b === 0x15 || b === 0x25 || b === 0x06) { flush(true); i++; continue; }
-            if (b === 0x34 && i + 2 < n) {
-                const cmd = raw.charCodeAt(i + 1);
-                const col = raw.charCodeAt(i + 2);
-                if (cmd === 0xC0 || cmd === 0xC1) {
-                    // Absolute column; pad forward. Backward = overstrike -> keep 1 space.
-                    if (col > cur.length) cur += " ".repeat(col - cur.length);
-                    else if (cur && !cur.endsWith(" ")) cur += " ";
-                }
-                i += 3;
-                continue;
-            }
-            if (b === 0x34 && i + 1 < n) { i += 3; continue; }   // other 0x34 cmd
-            if (b < 0x20 && b !== 0x09) { i++; continue; }        // other SCS
-            cur += raw[i];
-            i++;
-        }
-        flush(false);
-        return { lines, pageCount };
-    }
-    for (const page of raw.split("\f")) {
-        // Page-start PRTCTL Set Mode triple (\u0094 0x44 0x01); a bare \u0094
-        // elsewhere is a high-column byte, so strip only that exact triple.
-        let cleaned = page.replace(/\u0094\x44\x01/g, "");
-        // Strip a leading run of control bytes ending in a 0x44 Set-Mode byte
-        // (shows as a stray 'D' at the top of plain line-data reports).
-        cleaned = cleaned.replace(/^[\u0000-\u001F\u0080-\u009F]*\x44/, "");
-        let first = true;
-        for (const rec of cleaned.split("\u0000\n")) {
-            if (!first && rec === "") lines.push("");
-            first = false;
-            // Records with no \u0094{ framing are plain text; split any
-            // embedded newlines and emit one line each (no column bytes).
-            if (!rec.includes("\u0094{")) {
-                for (const piece of rec.split("\n")) {
-                    const plain = piece.replace(/[\u0000-\u001F\u0080-\u009F]/g, "").replace(/\s+$/, "");
-                    if (plain) lines.push(plain);
-                }
-                continue;
-            }
-            let cur = "";
-            for (const seg of rec.split("\u0094{")) {
-                if (!seg) continue;
-                const scs = seg.charCodeAt(0);
-                let text = seg.slice(1);
-                // A "column" byte that is an ASCII letter/digit is report text
-                // (framing byte dropped by the page stream) — put it back and
-                // skip column positioning for it.
-                const isText = scs >= 0x41 && scs <= 0x7A;
-                if (isText) text = seg;
-                text = text.replace(/[\u0000-\u001F\u0080-\u009F]/g, "");
-                if (!text) continue;          // pure positioning segment
-                if (!isText) {
-                    const col = scs >= 0x80 ? scs - 99 : scs - 1;
-                    if (col > cur.length && col <= 130) {
-                        cur += " ".repeat(col - cur.length);
-                    } else if (cur && !cur.endsWith(" ")) {
-                        cur += " ";
-                    }
-                }
-                cur += text;
-            }
-            cur = cur.replace(/\s+$/, "");
-            if (cur) lines.push(cur);
-        }
-    }
-    return { lines, pageCount: raw.split("\f").length };
+/** Render a spooled page stream to display text. Raw SCS bytes (Latin-1-mapped
+ * char codes) go through the byte-level SCS interpreter; otherwise the text is
+ * already decoded and split on \n / \f. Returns { lines, pageCount }. */
+export function renderSpoolText(base64: string): { lines: string[]; pageCount: number } {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    return renderScsBytes(bytes);
 }
 
 /** Build a minimal single-font text PDF from decoded spooled text, returned as
@@ -296,17 +214,20 @@ export function textToPdfBase64(text: string): string {
     const lineHeight = fontSize;
     const startY = pageH - 28;
     const perPage = Math.max(1, Math.floor((startY - 14) / lineHeight));
-    // Honor the spooled file's own page ejects: renderSpoolText splits on \f
-    // but flattens, so re-derive page boundaries from the raw text. Within a
-    // page, wrap to additional PDF pages only if it overflows perPage lines.
-    const rawPages = text.split("\f");
+    // Honor the spooled file's own page ejects: the SCS renderer marks page
+    // breaks with "\f" line entries. Split there; within a page, wrap to extra
+    // PDF pages only if it overflows perPage lines.
     const pages: string[] = [];
-    for (const rp of rawPages) {
-        const pageLines = renderSpoolText(rp).lines.filter((l) => l !== "\f");
-        for (let i = 0; i < pageLines.length; i += perPage) {
-            pages.push(pageLines.slice(i, i + perPage).join("\n"));
+    let cur: string[] = [];
+    for (const ln of lines) {
+        if (ln === "\f") {
+            for (let i = 0; i < cur.length; i += perPage) pages.push(cur.slice(i, i + perPage).join("\n"));
+            cur = [];
+            continue;
         }
+        cur.push(ln);
     }
+    for (let i = 0; i < cur.length; i += perPage) pages.push(cur.slice(i, i + perPage).join("\n"));
     if (pages.length === 0) pages.push("");
 
     const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
@@ -347,7 +268,7 @@ async function viewSpooledFile(f: SpooledFileInfo): Promise<void> {
     if (!app || !target) return;
     appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logView", "View {name}...").replace("{name}", f.name)}`, "msg-action");
     try {
-        const res = await app.GetSpooledFileData({ ...target, format: "text" });
+        const res = await app.GetSpooledFileData({ ...target, format: "raw" });
         const overlay = document.createElement("div");
         overlay.className = "spool-viewer-overlay";
         const box = document.createElement("div");
@@ -372,8 +293,8 @@ async function viewSpooledFile(f: SpooledFileInfo): Promise<void> {
         head.appendChild(closeBtn);
         const pre = document.createElement("pre");
         pre.className = "spool-viewer-content";
-        // Clean SCS control bytes; keep line spacing and page breaks visible.
-        pre.textContent = renderSpoolText(b64ToText(res.base64 ?? "")).lines
+        // Raw SCS bytes -> byte-level renderer keeps exact column positions.
+        pre.textContent = renderSpoolText(res.base64 ?? "").lines
             .map((l) => (l === "\f" ? "\n" : l)).join("\n");
         copyBtn.addEventListener("click", () => {
             const text = pre.textContent ?? "";
@@ -427,13 +348,13 @@ async function downloadSpooledFile(f: SpooledFileInfo, format: "pdf" | "text"): 
         if (format === "pdf") {
             // Build the PDF client-side from the decoded text — no host print
             // transform needed.
-            const textRes = await app.GetSpooledFileData({ ...target, format: "text" });
-            base64 = textToPdfBase64(b64ToText(textRes.base64 ?? ""));
+            const textRes = await app.GetSpooledFileData({ ...target, format: "raw" });
+            base64 = textToPdfBase64(textRes.base64 ?? "");
         } else {
             // Text download: same cleaned rendering the viewer shows, then
             // re-encode as base64 for the Go save routine.
-            const res = await app.GetSpooledFileData({ ...target, format });
-            const text = renderSpoolText(b64ToText(res.base64 ?? "")).lines
+            const res = await app.GetSpooledFileData({ ...target, format: "raw" });
+            const text = renderSpoolText(res.base64 ?? "").lines
                 .map((l) => (l === "\f" ? "" : l)).join("\n");
             base64 = btoa(unescape(encodeURIComponent(text)));
         }
@@ -454,8 +375,8 @@ async function printSpooledFile(f: SpooledFileInfo): Promise<void> {
     if (!app || !target) return;
     appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logPrint", "Print {name}...").replace("{name}", f.name)}`, "msg-action");
     try {
-        const textRes = await app.GetSpooledFileData({ ...target, format: "text" });
-        const base64 = textToPdfBase64(b64ToText(textRes.base64 ?? ""));
+        const textRes = await app.GetSpooledFileData({ ...target, format: "raw" });
+        const base64 = textToPdfBase64(textRes.base64 ?? "");
         await app.PrintSpooledFile(`${f.name.trim()}_${f.jobNumber.trim()}.pdf`, base64);
         appendLogLine(t("spool.logPrinted", "Sent {name} to the OS print handler").replace("{name}", f.name), "msg-info", true);
     } catch (err) {
