@@ -92,6 +92,13 @@ export interface SpooledFileInfo {
     size: number;
     status: string;
     holdStatus: string;
+    copies: number;
+    printer: string;
+    printerDevType: string;
+    createdBy: string;
+    priority: string;
+    jobSystem: string;
+    lpi: string;
 }
 
 export interface SpooledFileResult {

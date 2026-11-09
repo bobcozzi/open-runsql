@@ -27,6 +27,13 @@
 - Status column strips leading `*` (*READY -> READY).
 - Connect panel: green GO button (disabled until a saved profile is picked) left of Save password.
 
+## 2026-11-09 additions
+- Theme: System/Light/Dark dropdown right of Disconnect (`data-theme` on `:root`; `--fg-dim` darkened in light for readable labels; `.btn.primary` text forced white so Play/Refresh read on blue).
+- Spool table columns added: Copies, Printer, Device Type, Created By (TOUSERID else jobUser), Pty, System, LPI. SPLF Name retitled from "Name". jobName/jobUser/jobNumber combined into one "Job" column = jobnumber/jobuser/jobname.
+- Spool list lifecycle: clears on Disconnect, loads on Connect (spoolState.loadedFor reset + spool.clear()).
+- Selected-row readability: `.spool-selected` sets white text (`td` color #fff) on the accent background for both themes.
+- Java target lowered to 17 bytecode (release 17 in pom; verified version 61). Ship single binary; users need Java 17+ on PATH (IBMI_JAVA override optional). No bundled JRE.
+
 ## Build commands
 - Frontend+app: cd wails-app/frontend && npm run build && cd .. && go build -tags production -o ibmi-runsql . (then rm -rf ~/Library/Caches/ibmi-runsql to clear embedded-jar cache)
 - Bridge jar: cd java-bridge && JAVA_HOME=/Users/cozzi/.jdk/jdk-25.0.2/.../Home mvn -q clean package -DskipTests && cp target/ibmi-jdbc-bridge.jar ../wails-app/embed/

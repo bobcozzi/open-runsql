@@ -21,7 +21,7 @@
     --bg-input: #ffffff;
     --border: #d4d4d4;
     --fg: #1e1e1e;
-    --fg-dim: #6b7280;
+    --fg-dim: #4b5563;
     --accent: #0e639c;
     --accent-hover: #1177bb;
     --error: #c72e2e;
@@ -187,6 +187,7 @@ body {
 .btn.primary {
     background: var(--accent);
     border-color: var(--accent);
+    color: #fff;
 }
 
 .btn-go {
@@ -1031,10 +1032,16 @@ tr:nth-child(even) td {
 
 .spool-table tbody tr.spool-selected {
     background: var(--accent);
+    color: #fff;
+}
+
+.spool-table tbody tr.spool-selected td {
+    color: #fff;
 }
 
 .spool-table tbody tr.spool-selected:hover {
     background: var(--accent-hover);
+    color: #fff;
 }
 
 .context-sep {

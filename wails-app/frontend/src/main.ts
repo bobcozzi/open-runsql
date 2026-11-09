@@ -1326,6 +1326,10 @@ async function doConnect(): Promise<void> {
         setConnected(info);
         // Auto-save (MRU) on successful connect — no Save button needed.
         void saveProfile();
+        // Load spooled files for the new connection if the pane is visible.
+        spoolState.loadedFor = "";
+        spool.clear();
+        void refreshSpool(spool.filters());
     } catch (err) {
         els.btnConnect.disabled = false;
         els.connectError.textContent = String((err as Error)?.message ?? err);
@@ -1432,10 +1436,15 @@ async function doDisconnect(): Promise<void> {
         restoreActiveTab();
         renderTabs();
         syncConnectionUi();
+        // The remaining tab may be a different system — drop the stale list.
+        spool.clear();
+        spoolState.loadedFor = "";
         return;
     }
     snapshotActiveTab();
     setDisconnected();
+    spool.clear();
+    spoolState.loadedFor = "";
 }
 
 // Execute one statement text on the active tab; shared by all run modes.

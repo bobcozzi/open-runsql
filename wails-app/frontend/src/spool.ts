@@ -37,8 +37,10 @@ export function buildSpooledFileRequest(connectionId: string, f: SpoolFilters): 
 }
 
 export type SpoolSortKey =
-    | "name" | "number" | "jobName" | "jobUser" | "jobNumber" | "userData"
-    | "outq" | "created" | "pages" | "size" | "status" | "holdStatus";
+    | "name" | "number" | "job" | "userData"
+    | "outq" | "created" | "pages" | "size" | "status" | "holdStatus"
+    | "copies" | "printer" | "printerDevType"
+    | "createdBy" | "priority" | "jobSystem" | "lpi";
 
 interface SpoolColumn {
     key: SpoolSortKey;
@@ -48,15 +50,20 @@ interface SpoolColumn {
 }
 
 export const SPOOL_COLUMNS: SpoolColumn[] = [
-    { key: "name", labelKey: "spool.col.name", fallback: "Name" },
+    { key: "name", labelKey: "spool.col.name", fallback: "SPLF Name" },
     { key: "number", labelKey: "spool.col.number", fallback: "Number", numeric: true },
-    { key: "jobName", labelKey: "spool.col.jobName", fallback: "Job" },
-    { key: "jobUser", labelKey: "spool.col.jobUser", fallback: "User" },
-    { key: "jobNumber", labelKey: "spool.col.jobNumber", fallback: "Job#", numeric: true },
+    { key: "job", labelKey: "spool.col.job", fallback: "Job" },
     { key: "userData", labelKey: "spool.col.userData", fallback: "User Data" },
     { key: "outq", labelKey: "spool.col.outq", fallback: "Output Queue" },
     { key: "created", labelKey: "spool.col.created", fallback: "Created" },
     { key: "pages", labelKey: "spool.col.pages", fallback: "Pages", numeric: true },
+    { key: "copies", labelKey: "spool.col.copies", fallback: "Copies", numeric: true },
+    { key: "printer", labelKey: "spool.col.printer", fallback: "Printer" },
+    { key: "printerDevType", labelKey: "spool.col.printerDevType", fallback: "Device Type" },
+    { key: "createdBy", labelKey: "spool.col.createdBy", fallback: "Created By" },
+    { key: "priority", labelKey: "spool.col.priority", fallback: "Pty", numeric: true },
+    { key: "jobSystem", labelKey: "spool.col.jobSystem", fallback: "System" },
+    { key: "lpi", labelKey: "spool.col.lpi", fallback: "LPI" },
     { key: "size", labelKey: "spool.col.size", fallback: "Size", numeric: true },
     { key: "status", labelKey: "spool.col.status", fallback: "Status" },
     { key: "holdStatus", labelKey: "spool.col.holdStatus", fallback: "Hold" },
@@ -72,10 +79,14 @@ export function spoolCellText(f: SpooledFileInfo, key: SpoolSortKey): string {
     switch (key) {
         case "outq":
             return f.outqLib || f.outqName ? `${f.outqLib}/${f.outqName}` : "";
+        case "job":
+            return `${f.jobNumber}/${f.jobUser}/${f.jobName}`;
         case "created":
             return `${f.createDate} ${f.createTime}`.trim();
         case "pages":
             return String(f.pages);
+        case "copies":
+            return String(f.copies);
         case "size":
             return String(f.size);
         default:

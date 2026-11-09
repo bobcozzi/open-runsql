@@ -990,6 +990,55 @@ export class SpooledFileInfo {
              */
             this["holdStatus"] = "";
         }
+        if (!("copies" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["copies"] = 0;
+        }
+        if (!("printer" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["printer"] = "";
+        }
+        if (!("printerDevType" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["printerDevType"] = "";
+        }
+        if (!("createdBy" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["createdBy"] = "";
+        }
+        if (!("priority" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["priority"] = "";
+        }
+        if (!("jobSystem" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["jobSystem"] = "";
+        }
+        if (!("lpi" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["lpi"] = "";
+        }
 
         Object.assign(this, $$source);
     }

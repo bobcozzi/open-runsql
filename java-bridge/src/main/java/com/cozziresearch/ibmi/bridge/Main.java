@@ -410,6 +410,16 @@ public final class Main {
                 String status = splfStr(() -> f.getStringAttribute(PrintObject.ATTR_SPLFSTATUS));
                 file.put("status", status.startsWith("*") ? status.substring(1) : status);
                 file.put("holdStatus", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_HOLD)));
+                file.put("copies", splfLong(() -> f.getIntegerAttribute(PrintObject.ATTR_COPIES)));
+                file.put("printer", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_PRINTER)));
+                file.put("printerDevType", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_PRTDEVTYPE)));
+                // "Created by" = TOUSERID when set, else the job's user.
+                String createdBy = splfStr(() -> f.getStringAttribute(PrintObject.ATTR_TOUSERID));
+                if (createdBy.isEmpty()) createdBy = splfStr(f::getJobUser);
+                file.put("createdBy", createdBy);
+                file.put("priority", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_OUTPTY)));
+                file.put("jobSystem", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_JOBSYSTEM)));
+                file.put("lpi", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_LPI)));
                 files.add(file);
             }
         } finally {

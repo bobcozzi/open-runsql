@@ -136,20 +136,27 @@ type SpooledFileRequest struct {
 }
 
 type SpooledFileInfo struct {
-	Name       string `json:"name"`
-	Number     string `json:"number"`
-	JobName    string `json:"jobName"`
-	JobUser    string `json:"jobUser"`
-	JobNumber  string `json:"jobNumber"`
-	UserData   string `json:"userData"`
-	OutqName   string `json:"outqName"`
-	OutqLib    string `json:"outqLib"`
-	CreateDate string `json:"createDate"`
-	CreateTime string `json:"createTime"`
-	Pages      int64  `json:"pages"`
-	Size       int64  `json:"size"`
-	Status     string `json:"status"`
-	HoldStatus string `json:"holdStatus"`
+	Name           string `json:"name"`
+	Number         string `json:"number"`
+	JobName        string `json:"jobName"`
+	JobUser        string `json:"jobUser"`
+	JobNumber      string `json:"jobNumber"`
+	UserData       string `json:"userData"`
+	OutqName       string `json:"outqName"`
+	OutqLib        string `json:"outqLib"`
+	CreateDate     string `json:"createDate"`
+	CreateTime     string `json:"createTime"`
+	Pages          int64  `json:"pages"`
+	Size           int64  `json:"size"`
+	Status         string `json:"status"`
+	HoldStatus     string `json:"holdStatus"`
+	Copies         int64  `json:"copies"`
+	Printer        string `json:"printer"`
+	PrinterDevType string `json:"printerDevType"`
+	CreatedBy      string `json:"createdBy"`
+	Priority       string `json:"priority"`
+	JobSystem      string `json:"jobSystem"`
+	Lpi            string `json:"lpi"`
 }
 
 type SpooledFileResult struct {
@@ -794,6 +801,8 @@ func (a *App) ListSpooledFiles(req SpooledFileRequest) (*SpooledFileResult, erro
 				CreateDate: str2(fm, "createDate"), CreateTime: str2(fm, "createTime"),
 				Pages: int64Val(fm["pages"]), Size: int64Val(fm["size"]),
 				Status: str2(fm, "status"), HoldStatus: str2(fm, "holdStatus"),
+				Copies: int64Val(fm["copies"]), Printer: str2(fm, "printer"), PrinterDevType: str2(fm, "printerDevType"),
+				CreatedBy: str2(fm, "createdBy"), Priority: str2(fm, "priority"), JobSystem: str2(fm, "jobSystem"), Lpi: str2(fm, "lpi"),
 			})
 		}
 	}
