@@ -114,12 +114,19 @@ export function spoolEmptyText(): string {
     return t("spool.empty", "No spooled files match the current filters.");
 }
 
+export function spoolLoadingText(): string {
+    return t("spool.loading", "Loading spooled files...");
+}
+
 export interface SpoolPaneOptions {
     onRefresh: (filters: SpoolFilters) => void;
     /** Stage 2 hook: double-click a row to open the viewer. */
     onRowOpen?: (file: SpooledFileInfo) => void;
-    /** Stage 2: right-click a row → select it and open the action menu. */
-    onRowContext?: (file: SpooledFileInfo, x: number, y: number) => void;
+    /** Stage 2: right-click a row → open the action menu. `selected` is the
+     * current multi-selection in display order (always includes `file`). */
+    onRowContext?: (file: SpooledFileInfo, x: number, y: number, selected: SpooledFileInfo[]) => void;
+    /** Header Action button (right end of the filter row). */
+    onAction?: () => void;
 }
 
 export interface SpoolPaneHandle {
@@ -128,6 +135,8 @@ export interface SpoolPaneHandle {
     clear(): void;
     filters(): SpoolFilters;
     setBusy(busy: boolean): void;
+    /** Current selection in display order (empty when nothing is selected). */
+    selectedFiles(): SpooledFileInfo[];
 }
 
 export function createSpoolPane(opts: SpoolPaneOptions): SpoolPaneHandle {
@@ -198,6 +207,16 @@ export function createSpoolPane(opts: SpoolPaneOptions): SpoolPaneHandle {
     clearBtn.className = "btn spool-clear";
     clearBtn.textContent = t("spool.clear", "Clear");
 
+    const filterSpacer = document.createElement("span");
+    filterSpacer.className = "spacer";
+
+    const actionBtn = document.createElement("button");
+    actionBtn.type = "button";
+    actionBtn.className = "btn spool-open-downloads";
+    actionBtn.textContent = t("spool.openDownloads", "Open Download Folder");
+    actionBtn.title = t("spool.openDownloadsTitle", "Open the spooled-file download folder");
+    actionBtn.addEventListener("click", () => opts.onAction?.());
+
     filterRow.appendChild(userLabel);
     filterRow.appendChild(allUsersLabel);
     filterRow.appendChild(outqLabel);
@@ -205,6 +224,8 @@ export function createSpoolPane(opts: SpoolPaneOptions): SpoolPaneHandle {
     filterRow.appendChild(allOutqsLabel);
     filterRow.appendChild(refreshBtn);
     filterRow.appendChild(clearBtn);
+    filterRow.appendChild(filterSpacer);
+    filterRow.appendChild(actionBtn);
 
     // --- Results table ---
     const wrap = document.createElement("div");
@@ -245,6 +266,16 @@ export function createSpoolPane(opts: SpoolPaneOptions): SpoolPaneHandle {
     let files: SpooledFileInfo[] = [];
     let sortKey: SpoolSortKey | "" = "";
     let sortDir: 1 | -1 = 1;
+    // True while a list fetch is in flight: the empty state shows a loading
+    // message instead of "No spooled files match" (connect-time first load).
+    let loading = false;
+    // Multi-selection: plain click = single-select, Ctrl/Cmd+click toggles one
+    // row, Shift+click selects the range from the anchor (last clicked row).
+    // Selection holds object refs from `files`, so it survives re-sorts but is
+    // dropped on reload (setFiles/clear).
+    const selection = new Set<SpooledFileInfo>();
+    let anchorIdx = -1;
+    let viewFiles: SpooledFileInfo[] = [];
 
     function currentFilters(): SpoolFilters {
         return {
@@ -299,6 +330,12 @@ export function createSpoolPane(opts: SpoolPaneOptions): SpoolPaneHandle {
             const dir = sortDir;
             view.sort((a, b) => compareSpooledFiles(a, b, key, dir));
         }
+        viewFiles = view;
+        const applySelectionClasses = () => {
+            tbody.querySelectorAll("tr").forEach((r, ri) => {
+                r.classList.toggle("spool-selected", selection.has(viewFiles[ri]));
+            });
+        };
         const frag = document.createDocumentFragment();
         view.forEach((f, i) => {
             const tr = document.createElement("tr");
@@ -315,11 +352,8 @@ export function createSpoolPane(opts: SpoolPaneOptions): SpoolPaneHandle {
             const actionsTd = document.createElement("td");
             actionsTd.className = "spool-actions";
             tr.appendChild(actionsTd);
+            if (selection.has(f)) tr.classList.add("spool-selected");
             tr.addEventListener("dblclick", () => opts.onRowOpen?.(f));
-            const selectRow = () => {
-                tbody.querySelectorAll("tr.spool-selected").forEach((r) => r.classList.remove("spool-selected"));
-                tr.classList.add("spool-selected");
-            };
             // Row highlight only on a clean click (no drag). A left-button
             // down+drag is the user's deliberate text selection — leave the
             // native selection alone and don't steal the row highlight.
@@ -339,12 +373,25 @@ export function createSpoolPane(opts: SpoolPaneOptions): SpoolPaneHandle {
                 document.addEventListener("mousemove", move);
                 document.addEventListener("mouseup", up);
             });
-            tr.addEventListener("click", () => {
-                if (!dragged) {
-                    selectRow();
-                    // Clean click: revert cells to unselected for next time.
-                    tbody.querySelectorAll("td.spool-textsel").forEach((td) => td.classList.remove("spool-textsel"));
+            tr.addEventListener("click", (ev) => {
+                if (dragged) return;
+                const me = ev as MouseEvent;
+                if (me.metaKey || me.ctrlKey) {
+                    if (selection.has(f)) selection.delete(f); else selection.add(f);
+                    anchorIdx = i;
+                } else if (me.shiftKey && anchorIdx >= 0 && anchorIdx < viewFiles.length) {
+                    const lo = Math.min(anchorIdx, i);
+                    const hi = Math.max(anchorIdx, i);
+                    selection.clear();
+                    for (let r = lo; r <= hi; r++) selection.add(viewFiles[r]);
+                } else {
+                    selection.clear();
+                    selection.add(f);
+                    anchorIdx = i;
                 }
+                applySelectionClasses();
+                // Clean click: revert cells to unselected for next time.
+                tbody.querySelectorAll("td.spool-textsel").forEach((td) => td.classList.remove("spool-textsel"));
             });
             tr.addEventListener("contextmenu", (ev) => {
                 if (!opts.onRowContext) return;
@@ -352,14 +399,20 @@ export function createSpoolPane(opts: SpoolPaneOptions): SpoolPaneHandle {
                 // Keep the document-level contextmenu closer from firing on
                 // this same event and immediately closing the menu we open.
                 ev.stopPropagation();
-                // Select the row so the action target is unambiguous.
-                selectRow();
-                opts.onRowContext(f, ev.clientX, ev.clientY);
+                // Right-click on an unselected row single-selects it; on an
+                // already-selected row the multi-selection is the action target.
+                if (!selection.has(f)) {
+                    selection.clear();
+                    selection.add(f);
+                    anchorIdx = i;
+                }
+                applySelectionClasses();
+                opts.onRowContext(f, ev.clientX, ev.clientY, viewFiles.filter((x) => selection.has(x)));
             });
             frag.appendChild(tr);
         });
         tbody.appendChild(frag);
-        empty.textContent = spoolEmptyText();
+        empty.textContent = loading ? spoolLoadingText() : spoolEmptyText();
         empty.hidden = view.length > 0;
         table.hidden = view.length === 0;
     }
@@ -399,15 +452,24 @@ export function createSpoolPane(opts: SpoolPaneOptions): SpoolPaneHandle {
         root,
         setFiles(next: SpooledFileInfo[]): void {
             files = next;
+            selection.clear();
+            anchorIdx = -1;
             render();
         },
         clear(): void {
             files = [];
+            selection.clear();
+            anchorIdx = -1;
             render();
         },
         filters: currentFilters,
         setBusy(busy: boolean): void {
             refreshBtn.disabled = busy;
+            loading = busy;
+            render();
+        },
+        selectedFiles(): SpooledFileInfo[] {
+            return viewFiles.filter((x) => selection.has(x));
         },
     };
 }

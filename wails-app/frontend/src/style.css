@@ -335,6 +335,7 @@ body {
 
 .combo-item:hover {
     background: var(--accent);
+    color: #fff;
 }
 
 .combo-empty {
@@ -839,6 +840,27 @@ font-size: 12px;
     font-size: 12px;
 }
 
+/* Busy indicator (e.g. fetching a spooled file): contrast color + pulse so an
+ * in-flight request is unmistakable in the bottom tab bar. */
+.status-inline.status-busy {
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 700;
+    animation: status-busy-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes status-busy-pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.45;
+    }
+}
+
 .work-pane {
     flex: 1;
     min-height: 0;
@@ -868,7 +890,7 @@ table {
     border-collapse: collapse;
     width: 100%;
     font-family: "SF Mono", Menlo, Consolas, monospace;
-    font-size: 12px;
+    font-size: var(--results-font-size, 12px);
 }
 
 th,
@@ -1037,6 +1059,166 @@ tr:nth-child(even) td {
 
 .spool-table tbody tr.spool-selected td {
     color: #fff;
+}
+
+/* The Row gutter cell keeps its gray bg on even rows unless overridden here —
+ * it must join the accent band with white text like every other cell. */
+.spool-table tbody tr.spool-selected td.row-index {
+    background: var(--accent);
+    color: #fff;
+}
+
+/* Settings pane: INI-style two-pane editor — key listbox left, typed
+ * editor right. */
+.settings {
+    display: flex;
+    flex-direction: row;
+    min-height: 0;
+}
+
+.settings-keys {
+    list-style: none;
+    margin: 0;
+    padding: 6px 0;
+    width: 260px;
+    flex-shrink: 0;
+    overflow-y: auto;
+    border-right: 1px solid var(--border);
+    background: var(--bg-alt);
+}
+
+.settings-key {
+    padding: 6px 14px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--fg);
+}
+
+.settings-key:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+.settings-key.selected:hover {
+    background: var(--accent);
+}
+
+.settings-key.selected {
+    background: var(--accent);
+    color: #fff;
+}
+
+.settings-editor {
+    flex: 1;
+    min-width: 0;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.settings-editor-title {
+    font-weight: 700;
+    font-size: 13px;
+}
+
+.settings-editor-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    max-width: 560px;
+}
+
+.settings-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.settings-desc {
+    color: var(--fg-dim);
+    font-size: 11px;
+    max-width: 560px;
+}
+
+/* Connections pane: same two-pane layout as Settings. */
+.connections {
+    display: flex;
+    flex-direction: row;
+    min-height: 0;
+}
+
+.conn-left {
+    display: flex;
+    flex-direction: column;
+    width: 260px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    background: var(--bg-alt);
+}
+
+.conn-keys {
+    flex: 1;
+    width: auto;
+    border-right: none;
+    background: transparent;
+}
+
+.conn-list-footer {
+    display: flex;
+    gap: 6px;
+    padding: 8px 10px;
+    border-top: 1px solid var(--border);
+}
+
+.conn-dirty {
+    color: var(--accent);
+    font-size: 16px;
+    margin-left: 6px;
+    line-height: 1;
+}
+
+.conn-form {
+    gap: 8px;
+}
+
+.conn-field {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    max-width: 560px;
+    font-size: 12px;
+    color: var(--fg-dim);
+}
+
+.conn-field>span {
+    width: 130px;
+    flex-shrink: 0;
+    text-align: right;
+}
+
+.conn-field .settings-input,
+.conn-field select {
+    flex: 1;
+    min-width: 0;
+}
+
+.conn-field input[type="checkbox"] {
+    flex: none;
+}
+
+.conn-buttons {
+    margin-top: 6px;
+    justify-content: flex-start;
+}
+
+button.btn.danger {
+    color: var(--error, #c00);
 }
 
 .spool-table tbody tr.spool-selected:hover {

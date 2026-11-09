@@ -929,7 +929,8 @@ export function showPrompter(
             : "";
         if (errors.length > 0) {
             // Don't fail silently: banner into view, first bad field focused.
-            banner.scrollIntoView({ block: "nearest" });
+            // (jsdom lacks scrollIntoView; optional call keeps tests clean.)
+            banner.scrollIntoView?.({ block: "nearest" });
             const firstBad = form.querySelector<HTMLElement>(".prompter-field.has-error .prompter-input");
             firstBad?.focus();
         }

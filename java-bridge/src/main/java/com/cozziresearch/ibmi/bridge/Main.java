@@ -373,6 +373,8 @@ public final class Main {
         // host message text (shown in the frontend Messages pane).
         SpooledFileList list = new SpooledFileList(s.clSystem);
         ArrayNode files = JSON.createArrayNode();
+        long openMs = 0;
+        long iterateMs = 0;
         try {
             list.setUserFilter(allUsers ? "*ALL"
                     : (user == null || user.isBlank() ? "*CURRENT" : user.trim().toUpperCase(Locale.ROOT)));
@@ -385,7 +387,21 @@ public final class Main {
                 list.setQueueFilter("/QSYS.LIB/" + lib + ".LIB/"
                         + outq.trim().toUpperCase(Locale.ROOT) + ".OUTQ");
             }
+            // Prefetch every attribute read below with the list entries
+            // themselves — one host block per chunk instead of a round trip
+            // per attribute per file.
+            list.setAttributesToRetrieve(new int[] {
+                    PrintObject.ATTR_USERDATA, ATTR_OUTQUE, ATTR_OUTQUELIB,
+                    PrintObject.ATTR_PAGES, PrintObject.ATTR_SPLF_SIZE,
+                    PrintObject.ATTR_SPLF_SIZE_MULT, PrintObject.ATTR_SPLFSTATUS,
+                    PrintObject.ATTR_HOLD, PrintObject.ATTR_COPIES,
+                    PrintObject.ATTR_PRINTER, PrintObject.ATTR_PRTDEVTYPE,
+                    PrintObject.ATTR_TOUSERID, PrintObject.ATTR_OUTPTY,
+                    PrintObject.ATTR_JOBSYSTEM, PrintObject.ATTR_LPI });
+            long openStart = System.nanoTime();
             list.openSynchronously();
+            openMs = (System.nanoTime() - openStart) / 1_000_000L;
+            long iterStart = System.nanoTime();
             Enumeration<SpooledFile> e = list.getObjects();
             while (e.hasMoreElements()) {
                 SpooledFile f = e.nextElement();
@@ -422,12 +438,15 @@ public final class Main {
                 file.put("lpi", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_LPI)));
                 files.add(file);
             }
+            iterateMs = (System.nanoTime() - iterStart) / 1_000_000L;
         } finally {
             try { list.close(); } catch (Exception ignored) {}
         }
         ObjectNode result = JSON.createObjectNode();
         result.put("kind", "spooledFiles");
         result.set("files", files);
+        result.put("openMs", openMs);
+        result.put("iterateMs", iterateMs);
         result.put("elapsedMs", elapsedMs(started));
         return result;
     }

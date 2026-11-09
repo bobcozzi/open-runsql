@@ -10,6 +10,7 @@ import {
 } from "./sqltypes";
 import {
     App,
+    type AppSettings,
     type CLMessage,
     type CLResult,
     type ColumnInfo,
@@ -23,6 +24,8 @@ import { arrowRecallDirection, InputHistoryStore } from "./inputHistory";
 import { parseCmdXml } from "./clprompter/prompterModel";
 import { showPrompter } from "./clprompter/prompterView";
 import { buildSpooledFileRequest, createSpoolPane, type SpoolFilters } from "./spool";
+import { createSettingsPane, type SettingDef } from "./settings";
+import { createConnectionsPane } from "./connections";
 import { renderScsBytes } from "./scsRender";
 import type { SpooledFileInfo } from "./types";
 import { t } from "./l10n";
@@ -69,17 +72,24 @@ function applyTheme(mode: ThemeMode): void {
     document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
 }
 
+function setTheme(mode: ThemeMode): void {
+    localStorage.setItem(THEME_KEY, mode);
+    els.themeSelect.value = mode;
+    applyTheme(mode);
+}
+
+function currentTheme(): ThemeMode {
+    return (localStorage.getItem(THEME_KEY) as ThemeMode | null) ?? "system";
+}
+
 function initTheme(): void {
-    const saved = (localStorage.getItem(THEME_KEY) as ThemeMode | null) ?? "system";
-    els.themeSelect.value = saved;
-    applyTheme(saved);
+    applyTheme(currentTheme());
+    els.themeSelect.value = currentTheme();
     window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-        if (els.themeSelect.value === "system") applyTheme("system");
+        if (currentTheme() === "system") applyTheme("system");
     });
     els.themeSelect.addEventListener("change", () => {
-        const mode = els.themeSelect.value as ThemeMode;
-        localStorage.setItem(THEME_KEY, mode);
-        applyTheme(mode);
+        setTheme(els.themeSelect.value as ThemeMode);
     });
 }
 initTheme();
@@ -119,6 +129,8 @@ function applyL10nToStaticDom(): void {
     setText("btn-load-more", t("html.loadMore", "Load more"));
     setText("btn-load-all", t("html.loadAll", "Load all"));
     setText("work-tab-spool", t("spool.tab", "Spooled Files"));
+    setText("work-tab-connections", t("conn.tab", "Connections"));
+    setText("work-tab-settings", t("settings.tab", "Settings"));
 }
 applyL10nToStaticDom();
 
@@ -173,10 +185,161 @@ function showPane(name: string): void {
 const spoolState = { loadedFor: "" };
 const spool = createSpoolPane({
     onRefresh: (filters) => void refreshSpool(filters),
-    onRowOpen: (f) => void viewSpooledFile(f),
-    onRowContext: (f, x, y) => showSpoolContextMenu(f, x, y),
+    onRowOpen: (f) => void spoolDblClick(f),
+    onRowContext: (f, x, y, selected) => showSpoolContextMenu(f, x, y, selected),
+    onAction: () => {
+        App()?.OpenSpoolDownloadDir().catch((err) => showMessages([], String((err as Error)?.message ?? err)));
+    },
 });
 els.workArea.appendChild(spool.root);
+
+// --- Settings pane: INI-style key list + typed editor (settings.ts) ---
+// Persisted values live in Go's settings.json; "theme" mirrors the titlebar
+// dropdown via localStorage (front-end-only setting, onChanged applies it).
+const SETTING_DEFS: SettingDef[] = [
+    {
+        key: "theme",
+        type: "choice",
+        options: [["system", "System"], ["light", "Light"], ["dark", "Dark"]],
+        get: () => currentTheme(),
+        withValue: (s) => s,
+        persist: async (v) => { localStorage.setItem(THEME_KEY, v); },
+    },
+    {
+        key: "spoolDownloadDir",
+        type: "folder",
+        placeholder: "~/Downloads (default)",
+        get: (s) => s.spoolDownloadDir ?? "",
+        withValue: (s, v) => ({ ...s, spoolDownloadDir: v }),
+        browse: () => App()?.PickDirectory(t("settings.spoolDownloadDir.browseTitle", "Select download folder")) ?? Promise.resolve(""),
+    },
+    {
+        key: "fetchSize",
+        type: "number",
+        min: 10,
+        max: 10000,
+        placeholder: "200",
+        get: (s) => String(s.fetchSize ?? ""),
+        withValue: (s, v) => ({ ...s, fetchSize: v === "" ? undefined : Number(v) }),
+        persist: (v) => App()?.SetAppSetting("fetchSize", v) ?? Promise.resolve(),
+    },
+    {
+        key: "spoolDblClickAction",
+        type: "choice",
+        options: [
+            ["view", "View"],
+            ["dlPdf", "Download as PDF"],
+            ["dlText", "Download as Text"],
+            ["print", "Print locally"],
+        ],
+        get: (s) => s.spoolDblClickAction || "view",
+        withValue: (s, v) => ({ ...s, spoolDblClickAction: v as AppSettings["spoolDblClickAction"] }),
+        persist: (v) => App()?.SetAppSetting("spoolDblClickAction", v) ?? Promise.resolve(),
+    },
+    {
+        key: "defaultNaming",
+        type: "choice",
+        options: [["sql", "SQL naming"], ["system", "System naming"]],
+        get: (s) => s.defaultNaming || "sql",
+        withValue: (s, v) => ({ ...s, defaultNaming: v as AppSettings["defaultNaming"] }),
+        persist: (v) => App()?.SetAppSetting("defaultNaming", v) ?? Promise.resolve(),
+    },
+    {
+        key: "resultsFontSize",
+        type: "number",
+        min: 9,
+        max: 24,
+        placeholder: "12",
+        get: () => localStorage.getItem("ibmi-runsql-results-font") ?? "",
+        withValue: (s) => s,
+        persist: async (v) => { localStorage.setItem("ibmi-runsql-results-font", v); },
+    },
+    {
+        key: "spoolMaxRows",
+        type: "number",
+        min: 0,
+        max: 100000,
+        placeholder: "5000",
+        get: (s) => String(s.spoolMaxRows ?? ""),
+        withValue: (s, v) => ({ ...s, spoolMaxRows: v === "" ? undefined : Number(v) }),
+        persist: (v) => App()?.SetAppSetting("spoolMaxRows", v) ?? Promise.resolve(),
+    },
+    {
+        key: "confirmSpoolDelete",
+        type: "choice",
+        options: [["on", "On"], ["off", "Off"]],
+        get: (s) => (s.confirmSpoolDelete === false ? "off" : "on"),
+        withValue: (s, v) => ({ ...s, confirmSpoolDelete: v !== "off" }),
+        persist: (v) => App()?.SetAppSetting("confirmSpoolDelete", v) ?? Promise.resolve(),
+    },
+];
+{
+    const app = App();
+    const host = document.getElementById("pane-settings");
+    if (app && host) {
+        const pane = createSettingsPane({
+            load: async () => {
+                const s = await app.GetAppSettings();
+                appSettingsCache = s;
+                if (s.fetchSize) state.fetchSize = s.fetchSize;
+                spoolDblClickAction = (s.spoolDblClickAction || "view") as SpoolDblClickAction;
+                confirmSpoolDelete = s.confirmSpoolDelete !== false;
+                return s;
+            },
+            save: (next) => app.SetAppSetting("spoolDownloadDir", next.spoolDownloadDir ?? ""),
+            onSaved: () => appendLogLine(t("settings.saved", "Settings saved"), "msg-info", true),
+            onError: (msg) => showMessages([], msg),
+            onChanged: (key, value) => {
+                if (key === "theme") setTheme(value as ThemeMode);
+                else if (key === "fetchSize") state.fetchSize = Number(value) || 200;
+                else if (key === "spoolDblClickAction") spoolDblClickAction = (value || "view") as SpoolDblClickAction;
+                else if (key === "defaultNaming") el<HTMLSelectElement>("in-naming").value = value || "sql";
+                else if (key === "resultsFontSize") applyResultsFontSize(Number(value) || 12);
+                else if (key === "spoolMaxRows") appSettingsCache = { ...appSettingsCache, spoolMaxRows: Number(value) || 0 };
+                else if (key === "confirmSpoolDelete") confirmSpoolDelete = value !== "off";
+            },
+        }, SETTING_DEFS);
+        host.appendChild(pane.root);
+    }
+    // Apply the persisted results font size at boot (no settings read needed —
+    // it lives in localStorage like the theme).
+    const savedFont = localStorage.getItem("ibmi-runsql-results-font");
+    if (savedFont) applyResultsFontSize(Number(savedFont) || 12);
+    // --- Connections pane: profile editor (connections.ts) ---
+    const connHost = document.getElementById("pane-connections");
+    if (app && connHost) {
+        const pane = createConnectionsPane({
+            load: () => app.ListConnectionProfiles(),
+            save: (origName, p) => app.UpdateConnectionProfile(origName, p),
+            remove: (name) => app.DeleteConnectionProfile(name),
+            onChanged: () => void loadProfiles(),
+            onError: (msg) => showMessages([], msg),
+        });
+        connHost.appendChild(pane.root);
+    }
+}
+
+/** Double-click dispatch for spool rows, per the Settings choice. */
+type SpoolDblClickAction = "view" | "dlPdf" | "dlText" | "print";
+let spoolDblClickAction: SpoolDblClickAction = "view";
+async function spoolDblClick(f: SpooledFileInfo): Promise<void> {
+    switch (spoolDblClickAction) {
+        case "dlPdf": await downloadSpooledFile(f, "pdf"); break;
+        case "dlText": await downloadSpooledFile(f, "text"); break;
+        case "print": await printSpooledFile(f); break;
+        default: await viewSpooledFile(f);
+    }
+}
+
+/** Settings-backed toggles applied across the UI. */
+let confirmSpoolDelete = true;
+let appSettingsCache: AppSettings = {};
+function spoolMaxRowsSetting(): number {
+    return appSettingsCache.spoolMaxRows ?? 0;
+}
+function applyResultsFontSize(px: number): void {
+    document.documentElement.style.setProperty("--results-font-size", `${px}px`);
+}
 
 type SpoolTarget = { connectionId: string; name: string; number: string; jobName: string; jobUser: string; jobNumber: string };
 
@@ -184,6 +347,35 @@ function spoolTarget(f: SpooledFileInfo): SpoolTarget | null {
     const connectionId = activeTab()?.connectionId ?? "";
     if (!connectionId) return null;
     return { connectionId, name: f.name, number: f.number, jobName: f.jobName, jobUser: f.jobUser, jobNumber: f.jobNumber };
+}
+
+/** Download/print file name base: name + job number + splf number, so repeated
+ * creations of the same file name in one job never overwrite each other. */
+function spoolFileBaseName(f: SpooledFileInfo): string {
+    return `${f.name.trim()}_${f.jobNumber.trim()}_${f.number.trim()}`;
+}
+
+/** Busy indication for spool fetch operations (View/Download/SaveRaw/Print):
+ * contrast-colored pulsing status text in the bottom tab bar while the bridge
+ * call runs. clearSpoolBusy removes the styling; callers set the follow-up
+ * text (Saved..., or blank) themselves. */
+function setSpoolBusy(name: string): void {
+    setSpoolBusyText(t("spool.statusGetting", "Retrieving spooled file {name}...").replace("{name}", name));
+}
+
+/** Per-file progress during a multi-file operation: "Retrieving (2 of 5)...". */
+function setSpoolBusyProgress(name: string, index: number, total: number): void {
+    setSpoolBusyText(t("spool.statusGettingOf", "Retrieving spooled file {name} ({index} of {total})...")
+        .replace("{name}", name).replace("{index}", String(index)).replace("{total}", String(total)));
+}
+
+function setSpoolBusyText(text: string): void {
+    els.statusText.textContent = text;
+    els.statusText.classList.add("status-busy");
+}
+
+function clearSpoolBusy(): void {
+    els.statusText.classList.remove("status-busy");
 }
 
 function b64ToText(b64: string): string {
@@ -220,7 +412,12 @@ export function renderSpoolText(base64: string): { lines: string[]; pageCount: n
 /** Build a minimal single-font text PDF from decoded spooled text, returned as
  * base64. No host print transform needed. */
 export function textToPdfBase64(text: string): string {
-    const { lines } = renderSpoolText(text);
+    return linesToPdfBase64(renderSpoolText(text).lines);
+}
+
+/** Build a PDF from pre-rendered spooled text lines ("\f" entries = page
+ * ejects). Multi-file prints join files with a "\f" separator and call this. */
+export function linesToPdfBase64(lines: string[]): string {
     const clean = lines.filter((l) => l !== "\f");
     // Classic SCS output is 132 columns; switch to landscape when any line is
     // wider than an 80-col portrait page fits. Courier 9pt char width ~5.4pt.
@@ -287,18 +484,25 @@ export function textToPdfBase64(text: string): string {
     return btoa(pdf);
 }
 
-/** Text viewer overlay for a spooled file (View / double-click). */
-async function viewSpooledFile(f: SpooledFileInfo): Promise<void> {
+/** Text viewer overlay for a spooled file (View / double-click).
+ * Multi-select: each file gets its own viewer; overlays open cascaded. */
+async function viewSpooledFile(f: SpooledFileInfo, cascadeIndex = 0): Promise<void> {
     const app = App();
     const target = spoolTarget(f);
     if (!app || !target) return;
     appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logView", "View {name}...").replace("{name}", f.name)}`, "msg-action");
+    setSpoolBusy(f.name);
     try {
         const res = await app.GetSpooledFileData({ ...target, format: "raw" });
         const overlay = document.createElement("div");
         overlay.className = "spool-viewer-overlay";
         const box = document.createElement("div");
         box.className = "spool-viewer";
+        if (cascadeIndex > 0) {
+            // Stagger stacked viewers so the user can see more than one open.
+            box.style.marginLeft = `${Math.min(cascadeIndex * 40, 300)}px`;
+            box.style.marginTop = `${Math.min(cascadeIndex * 30, 180)}px`;
+        }
         const head = document.createElement("div");
         head.className = "spool-viewer-head";
         const title = document.createElement("span");
@@ -313,7 +517,8 @@ async function viewSpooledFile(f: SpooledFileInfo): Promise<void> {
         closeBtn.type = "button";
         closeBtn.className = "btn";
         closeBtn.textContent = t("spool.close", "Close");
-        closeBtn.addEventListener("click", () => overlay.remove());
+        const close = () => { overlay.remove(); document.removeEventListener("keydown", onEsc); };
+        closeBtn.addEventListener("click", close);
         head.appendChild(title);
         head.appendChild(copyBtn);
         head.appendChild(closeBtn);
@@ -335,40 +540,72 @@ async function viewSpooledFile(f: SpooledFileInfo): Promise<void> {
         box.appendChild(head);
         box.appendChild(pre);
         overlay.appendChild(box);
-        overlay.addEventListener("click", (ev) => { if (ev.target === overlay) overlay.remove(); });
-        document.addEventListener("keydown", function onEsc(ev) {
-            if (ev.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", onEsc); }
-        });
+        overlay.addEventListener("click", (ev) => { if (ev.target === overlay) close(); });
+        const onEsc = (ev: KeyboardEvent) => {
+            if (ev.key !== "Escape") return;
+            // Topmost overlay handles Esc; deeper ones stay open.
+            if (overlay !== document.body.lastElementChild) return;
+            close();
+        };
+        document.addEventListener("keydown", onEsc);
         document.body.appendChild(overlay);
+        els.statusText.textContent = "";
     } catch (err) {
+        els.statusText.textContent = "";
         showMessages([], String((err as Error)?.message ?? err));
+    } finally {
+        clearSpoolBusy();
     }
+}
+
+/** View each selected file in its own overlay (single fetch → open → next). */
+async function viewSpooledFiles(files: SpooledFileInfo[]): Promise<void> {
+    if (files.length === 0) return;
+    if (files.length === 1) {
+        await viewSpooledFile(files[0]);
+        return;
+    }
+    setSpoolBusyText(t("spool.statusViewing", "Viewing {count} spooled files...").replace("{count}", String(files.length)));
+    for (let i = 0; i < files.length; i++) {
+        await viewSpooledFile(files[i], i);
+    }
+    els.statusText.textContent = "";
 }
 
 /** Save the raw page-stream bytes (no rendering) to ~/Downloads for SCS
  * debugging. format="raw" skips the bridge CCSID decode. */
-async function saveRawSpooledFile(f: SpooledFileInfo): Promise<void> {
+async function saveRawSpooledFile(f: SpooledFileInfo, openAfter = true, idx = 0, total = 1): Promise<void> {
     const app = App();
     const target = spoolTarget(f);
     if (!app || !target) return;
     appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logRaw", "Save raw {name}...").replace("{name}", f.name)}`, "msg-action");
+    if (total > 1) setSpoolBusyProgress(f.name, idx + 1, total); else setSpoolBusy(f.name);
     try {
         const res = await app.GetSpooledFileData({ ...target, format: "raw" });
-        const saved = await app.SaveSpooledFile(`${f.name.trim()}_${f.jobNumber.trim()}.raw`, res.base64 ?? "");
+        const saved = await app.SaveSpooledFile(`${spoolFileBaseName(f)}.raw`, res.base64 ?? "");
         appendLogLine(t("spool.logSaved", "Saved to {path}").replace("{path}", saved), "msg-info", true);
         els.statusText.textContent = t("spool.statusSaved", "Saved {path}").replace("{path}", saved);
-        await app.OpenSpooledFile(saved);
+        if (openAfter) await app.OpenSpooledFile(saved);
     } catch (err) {
+        els.statusText.textContent = "";
         showMessages([], String((err as Error)?.message ?? err));
+    } finally {
+        clearSpoolBusy();
     }
 }
 
+/** Save raw for each selected file; auto-open only for a single file. */
+async function saveRawSpooledFiles(files: SpooledFileInfo[]): Promise<void> {
+    for (let i = 0; i < files.length; i++) await saveRawSpooledFile(files[i], files.length === 1, i, files.length);
+}
+
 /** Download a spooled file as PDF or text to ~/Downloads. */
-async function downloadSpooledFile(f: SpooledFileInfo, format: "pdf" | "text"): Promise<void> {
+async function downloadSpooledFile(f: SpooledFileInfo, format: "pdf" | "text", openAfter = true, idx = 0, total = 1): Promise<void> {
     const app = App();
     const target = spoolTarget(f);
     if (!app || !target) return;
     appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logDownload", "Download {name} as {fmt}...").replace("{name}", f.name).replace("{fmt}", format.toUpperCase())}`, "msg-action");
+    if (total > 1) setSpoolBusyProgress(f.name, idx + 1, total); else setSpoolBusy(f.name);
     try {
         let base64: string;
         if (format === "pdf") {
@@ -384,14 +621,22 @@ async function downloadSpooledFile(f: SpooledFileInfo, format: "pdf" | "text"): 
                 .map((l) => (l === "\f" ? "" : l)).join("\n");
             base64 = btoa(unescape(encodeURIComponent(text)));
         }
-        const saved = await app.SaveSpooledFile(`${f.name.trim()}_${f.jobNumber.trim()}.${format === "pdf" ? "pdf" : "txt"}`, base64);
+        const saved = await app.SaveSpooledFile(`${spoolFileBaseName(f)}.${format === "pdf" ? "pdf" : "txt"}`, base64);
         appendLogLine(t("spool.logSaved", "Saved to {path}").replace("{path}", saved), "msg-info", true);
         els.statusText.textContent = t("spool.statusSaved", "Saved {path}").replace("{path}", saved);
         // Open the download with the OS default handler so the user can view it.
-        await app.OpenSpooledFile(saved);
+        if (openAfter) await app.OpenSpooledFile(saved);
     } catch (err) {
+        els.statusText.textContent = "";
         showMessages([], String((err as Error)?.message ?? err));
+    } finally {
+        clearSpoolBusy();
     }
+}
+
+/** Download each selected file; auto-open only for a single file. */
+async function downloadSpooledFiles(files: SpooledFileInfo[], format: "pdf" | "text"): Promise<void> {
+    for (let i = 0; i < files.length; i++) await downloadSpooledFile(files[i], format, files.length === 1, i, files.length);
 }
 
 /** Print locally: fetch the PDF and hand it to the OS (print dialog). */
@@ -400,30 +645,70 @@ async function printSpooledFile(f: SpooledFileInfo): Promise<void> {
     const target = spoolTarget(f);
     if (!app || !target) return;
     appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logPrint", "Print {name}...").replace("{name}", f.name)}`, "msg-action");
+    setSpoolBusy(f.name);
     try {
         const textRes = await app.GetSpooledFileData({ ...target, format: "raw" });
         const base64 = textToPdfBase64(textRes.base64 ?? "");
-        await app.PrintSpooledFile(`${f.name.trim()}_${f.jobNumber.trim()}.pdf`, base64);
+        await app.PrintSpooledFile(`${spoolFileBaseName(f)}.pdf`, base64);
         appendLogLine(t("spool.logPrinted", "Sent {name} to the OS print handler").replace("{name}", f.name), "msg-info", true);
+        els.statusText.textContent = "";
     } catch (err) {
+        els.statusText.textContent = "";
         showMessages([], String((err as Error)?.message ?? err));
+    } finally {
+        clearSpoolBusy();
     }
 }
 
-async function spoolAction(f: SpooledFileInfo, action: "hold" | "release" | "delete"): Promise<void> {
+/** Multi-print: combine into one PDF (page eject between files) so the OS
+ * shows a single print dialog. */
+async function printSpooledFiles(files: SpooledFileInfo[]): Promise<void> {
     const app = App();
-    const target = spoolTarget(f);
-    if (!app || !target) return;
-    // Delete is destructive — require the row be the right-click-selected one
-    // (the context menu only opens on the selected row, so this is the guard).
-    appendLogLine(`[ ${nowStamp()} ]  ${action} ${f.name}...`, "msg-action");
-    try {
-        const res = await app.SpooledFileAction({ ...target, action });
-        appendLogLine(`${res.message}   (${res.elapsedMs} ms)`, res.ok ? "msg-info" : "msg-error", true);
-        void refreshSpool(spool.filters());
-    } catch (err) {
-        showMessages([], String((err as Error)?.message ?? err));
+    if (!app || files.length === 0) return;
+    if (files.length === 1) {
+        await printSpooledFile(files[0]);
+        return;
     }
+    appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logPrintMulti", "Print {count} spooled files...").replace("{count}", String(files.length))}`, "msg-action");
+    try {
+        const allLines: string[] = [];
+        for (let i = 0; i < files.length; i++) {
+            const f = files[i];
+            const target = spoolTarget(f);
+            if (!target) continue;
+            setSpoolBusyProgress(f.name, i + 1, files.length);
+            const res = await app.GetSpooledFileData({ ...target, format: "raw" });
+            if (allLines.length > 0) allLines.push("\f");
+            allLines.push(...renderSpoolText(res.base64 ?? "").lines);
+        }
+        setSpoolBusyText(t("spool.statusPrinting", "Sending {count} spooled files to print...").replace("{count}", String(files.length)));
+        await app.PrintSpooledFile("spooled_files.pdf", linesToPdfBase64(allLines));
+        appendLogLine(t("spool.logPrintedMulti", "Sent {count} spooled files to the OS print handler").replace("{count}", String(files.length)), "msg-info", true);
+        els.statusText.textContent = "";
+    } catch (err) {
+        els.statusText.textContent = "";
+        showMessages([], String((err as Error)?.message ?? err));
+    } finally {
+        clearSpoolBusy();
+    }
+}
+
+/** Run hold/release/delete on each file sequentially; one refresh at the end. */
+async function spoolActions(files: SpooledFileInfo[], action: "hold" | "release" | "delete"): Promise<void> {
+    const app = App();
+    if (!app || files.length === 0) return;
+    for (const f of files) {
+        const target = spoolTarget(f);
+        if (!target) continue;
+        appendLogLine(`[ ${nowStamp()} ]  ${action} ${f.name}...`, "msg-action");
+        try {
+            const res = await app.SpooledFileAction({ ...target, action });
+            appendLogLine(`${res.message}   (${res.elapsedMs} ms)`, res.ok ? "msg-info" : "msg-error", true);
+        } catch (err) {
+            showMessages([], String((err as Error)?.message ?? err));
+        }
+    }
+    void refreshSpool(spool.filters());
 }
 
 let contextMenuEl: HTMLDivElement | undefined;
@@ -433,11 +718,13 @@ function closeContextMenu(): void {
 }
 
 /** CL-style "Move to Output Queue" dialog: Output queue + Library fields,
- * MOVE/CANCEL buttons, and F4/Select to open a filtered queue picker. */
-function moveSpooledFileDialog(f: SpooledFileInfo): void {
+ * MOVE/CANCEL buttons, and F4/Select to open a filtered queue picker.
+ * Multi-selection: one dialog, files moved sequentially to the same queue. */
+function moveSpooledFilesDialog(files: SpooledFileInfo[]): void {
     const app = App();
-    const target = spoolTarget(f);
-    if (!app || !target) return;
+    const f0 = files[0];
+    const target0 = f0 ? spoolTarget(f0) : null;
+    if (!app || !f0 || !target0) return;
     const overlay = document.createElement("div");
     overlay.className = "spool-viewer-overlay";
     const box = document.createElement("div");
@@ -453,13 +740,20 @@ function moveSpooledFileDialog(f: SpooledFileInfo): void {
             <button type="button" id="mv-ok" class="btn primary">${t("spool.moveOk", "Move")}</button>
             <button type="button" id="mv-cancel" class="btn">${t("spool.moveCancel", "Cancel")}</button>
         </div>`;
-    // Read-only context: the file being moved + its current queue prefilled.
-    (box.querySelector("#mv-file") as HTMLInputElement).value = f.name.trim();
-    (box.querySelector("#mv-filenum") as HTMLInputElement).value = f.number.trim();
-    (box.querySelector("#mv-outq") as HTMLInputElement).value = f.outqName.trim();
-    (box.querySelector("#mv-outqlib") as HTMLInputElement).value = f.outqLib.trim();
+    // Read-only context: the file(s) being moved + current queue prefilled.
+    (box.querySelector("#mv-file") as HTMLInputElement).value = files.length > 1
+        ? t("spool.moveFileMulti", "{count} spooled files").replace("{count}", String(files.length))
+        : f0.name.trim();
+    const numRow = (box.querySelector("#mv-filenum") as HTMLInputElement).closest("label") as HTMLElement;
+    if (files.length > 1) {
+        numRow.hidden = true;
+    } else {
+        (box.querySelector("#mv-filenum") as HTMLInputElement).value = f0.number.trim();
+    }
+    (box.querySelector("#mv-outq") as HTMLInputElement).value = f0.outqName.trim();
+    (box.querySelector("#mv-outqlib") as HTMLInputElement).value = f0.outqLib.trim();
     // Reflect the file's current hold state in the Hold dropdown.
-    const held = /^(yes|\*yes|hld|held)/i.test(f.holdStatus.trim());
+    const held = /^(yes|\*yes|hld|held)/i.test(f0.holdStatus.trim());
     (box.querySelector("#mv-hold") as HTMLSelectElement).value = held ? "yes" : "no";
     overlay.appendChild(box);
     const close = () => overlay.remove();
@@ -471,24 +765,30 @@ function moveSpooledFileDialog(f: SpooledFileInfo): void {
     const doMove = async () => {
         const toQueue = outq.value.trim();
         if (!toQueue) { outq.focus(); return; }
-        try {
-            // Hold first when *YES so the file cannot print on arrival.
-            const holdFirst = holdSel.value === "yes";
-            const res = await app.MoveSpooledFile({ ...target, toLibrary: outqLib.value.trim(), toQueue, holdFirst });
-            appendLogLine(`${res.message}   (${res.elapsedMs} ms)`, res.ok ? "msg-info" : "msg-error", true);
-            close();
-            void refreshSpool(spool.filters());
-        } catch (err) {
-            showMessages([], String((err as Error)?.message ?? err));
+        const okBtn = box.querySelector<HTMLButtonElement>("#mv-ok")!;
+        okBtn.disabled = true;
+        // Hold first when *YES so the file cannot print on arrival.
+        const holdFirst = holdSel.value === "yes";
+        for (const f of files) {
+            const target = spoolTarget(f);
+            if (!target) continue;
+            try {
+                const res = await app.MoveSpooledFile({ ...target, toLibrary: outqLib.value.trim(), toQueue, holdFirst });
+                appendLogLine(`${res.message}   (${res.elapsedMs} ms)`, res.ok ? "msg-info" : "msg-error", true);
+            } catch (err) {
+                appendLogLine(String((err as Error)?.message ?? err), "msg-error", true);
+            }
         }
+        close();
+        void refreshSpool(spool.filters());
     };
     box.querySelector("#mv-ok")!.addEventListener("click", () => void doMove());
-    box.querySelector("#mv-f4")!.addEventListener("click", () => openOutqPicker(target.connectionId, (lib, name) => {
+    box.querySelector("#mv-f4")!.addEventListener("click", () => openOutqPicker(target0.connectionId, (lib, name) => {
         outqLib.value = lib; outq.value = name;
     }));
     overlay.addEventListener("keydown", (ev) => {
         if (ev.key === "Escape") close();
-        if (ev.key === "F4") openOutqPicker(target.connectionId, (lib, name) => { outqLib.value = lib; outq.value = name; });
+        if (ev.key === "F4") openOutqPicker(target0.connectionId, (lib, name) => { outqLib.value = lib; outq.value = name; });
         if (ev.key === "Enter" && (ev.target as HTMLElement).tagName === "INPUT") void doMove();
     });
     document.body.appendChild(overlay);
@@ -554,7 +854,7 @@ function openOutqPicker(connectionId: string, onPick: (lib: string, name: string
     void load();
 }
 
-function showSpoolContextMenu(f: SpooledFileInfo, x: number, y: number): void {
+function showSpoolContextMenu(f: SpooledFileInfo, x: number, y: number, selected: SpooledFileInfo[]): void {
     closeContextMenu();
     const menu = document.createElement("div");
     menu.className = "context-menu";
@@ -573,12 +873,15 @@ function showSpoolContextMenu(f: SpooledFileInfo, x: number, y: number): void {
         d.className = "context-sep";
         menu.appendChild(d);
     };
-    addItem(t("spool.act.view", "View"), () => void viewSpooledFile(f));
+    // The right-clicked row is always part of the selection (pane guarantees
+    // it); actions apply to the whole selection.
+    const targets = selected.length > 0 ? selected : [f];
+    addItem(t("spool.act.view", "View"), () => void viewSpooledFiles(targets));
     addItem(t("spool.act.copyRow", "Copy row"), () => {
-        const text = [f.name, f.number, f.jobName, f.jobUser, f.jobNumber, f.userData,
-        (f.outqLib || f.outqName ? `${f.outqLib}/${f.outqName}` : ""),
-        `${f.createDate} ${f.createTime}`.trim(), String(f.pages), String(f.size),
-        f.status, f.holdStatus].join("\t");
+        const text = targets.map((g) => [g.name, g.number, g.jobName, g.jobUser, g.jobNumber, g.userData,
+        (g.outqLib || g.outqName ? `${g.outqLib}/${g.outqName}` : ""),
+        `${g.createDate} ${g.createTime}`.trim(), String(g.pages), String(g.size),
+        g.status, g.holdStatus].join("\t")).join("\n");
         // navigator.clipboard needs a secure context; fall back to execCommand.
         const done = () => appendLogLine(t("spool.logCopied", "Copied row to clipboard"), "msg-info", true);
         if (navigator.clipboard?.writeText) {
@@ -588,15 +891,24 @@ function showSpoolContextMenu(f: SpooledFileInfo, x: number, y: number): void {
             done();
         }
     });
-    addItem(t("spool.act.dlPdf", "Download as PDF"), () => void downloadSpooledFile(f, "pdf"));
-    addItem(t("spool.act.dlText", "Download as Text"), () => void downloadSpooledFile(f, "text"));
-    addItem(t("spool.act.saveRaw", "Save Raw"), () => void saveRawSpooledFile(f));
-    addItem(t("spool.act.print", "Print locally"), () => void printSpooledFile(f));
+    addItem(t("spool.act.dlPdf", "Download as PDF"), () => void downloadSpooledFiles(targets, "pdf"));
+    addItem(t("spool.act.dlText", "Download as Text"), () => void downloadSpooledFiles(targets, "text"));
+    addItem(t("spool.act.saveRaw", "Save Raw"), () => void saveRawSpooledFiles(targets));
+    addItem(t("spool.act.print", "Print locally"), () => void printSpooledFiles(targets));
     sep();
-    addItem(t("spool.act.move", "Move..."), () => moveSpooledFileDialog(f));
-    addItem(t("spool.act.hold", "Hold"), () => void spoolAction(f, "hold"));
-    addItem(t("spool.act.release", "Release"), () => void spoolAction(f, "release"));
-    addItem(t("spool.act.delete", "Delete"), () => void spoolAction(f, "delete"), true);
+    addItem(t("spool.act.move", "Move..."), () => moveSpooledFilesDialog(targets));
+    addItem(t("spool.act.hold", "Hold"), () => void spoolActions(targets, "hold"));
+    addItem(t("spool.act.release", "Release"), () => void spoolActions(targets, "release"));
+    addItem(t("spool.act.delete", "Delete"), () => {
+        if (!confirmSpoolDelete) {
+            void spoolActions(targets, "delete");
+            return;
+        }
+        const msg = targets.length > 1
+            ? t("spool.confirmDeleteMulti", "Delete {count} spooled files?").replace("{count}", String(targets.length))
+            : t("spool.confirmDelete", "Delete spooled file {name}?").replace("{name}", f.name);
+        if (window.confirm(msg)) void spoolActions(targets, "delete");
+    }, true);
     document.body.appendChild(menu);
     contextMenuEl = menu;
 }
@@ -613,11 +925,21 @@ async function refreshSpool(filters: SpoolFilters): Promise<void> {
     appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logList", "List Spooled Files...")}`, "msg-action");
     try {
         const result = await app.ListSpooledFiles(buildSpooledFileRequest(connectionId, filters));
-        const count = result.files?.length ?? 0;
-        spool.setFiles(result.files ?? []);
+        const cap = spoolMaxRowsSetting();
+        const rows = result.files ?? [];
+        const truncated = cap > 0 && rows.length > cap;
+        const files = truncated ? rows.slice(0, cap) : rows;
+        const count = files.length;
+        const renderStart = performance.now();
+        spool.setFiles(files);
+        const renderMs = Math.round(performance.now() - renderStart);
         spoolState.loadedFor = connectionId;
         appendLogLine(t("spool.logListed", "Listed {count} spooled file(s)   ({ms} ms)")
-            .replace("{count}", String(count)).replace("{ms}", String(result.elapsedMs)), "msg-info", true);
+            .replace("{count}", String(count)).replace("{ms}", String(result.elapsedMs)) + " "
+            + t("spool.logTiming", "(open {open} ms, fetch {fetch} ms, render {render} ms)")
+                .replace("{open}", String(result.openMs)).replace("{fetch}", String(result.iterateMs))
+                .replace("{render}", String(renderMs))
+            + (truncated ? " " + t("spool.logCapped", "(capped at {cap} by Settings)").replace("{cap}", String(cap)) : ""), "msg-info", true);
         els.statusText.textContent = t("spool.statusCount", "{count} spooled file(s) in {ms} ms")
             .replace("{count}", String(count)).replace("{ms}", String(result.elapsedMs));
     } catch (err) {
@@ -880,6 +1202,10 @@ function addTab(): ConnectionTab {
     tabs.push(tab);
     activeTabKey = tab.key;
     restoreActiveTab();
+    // Settings "default naming mode" preselects the connect form's Naming.
+    if (appSettingsCache.defaultNaming) {
+        el<HTMLSelectElement>("in-naming").value = appSettingsCache.defaultNaming;
+    }
     renderTabs();
     syncConnectionUi();
     return tab;
@@ -966,10 +1292,6 @@ async function closeTab(key: string): Promise<void> {
     syncConnectionUi();
 }
 
-// True after the first connect attempt in this window: keeps the work area
-// visible for failure feedback instead of re-hiding it when still disconnected.
-let connectAttempted = false;
-
 function syncConnectionUi(): void {
     const tab = activeTab();
     const connected = !!tab?.connectionId;
@@ -983,12 +1305,10 @@ function syncConnectionUi(): void {
     els.btnPrompt.disabled = !connected;
     els.btnCancel.disabled = true;
     els.connectPanel.hidden = connected;
-    // Results/Messages area + run buttons are meaningless without a connection;
-    // editor stays usable. After a connect attempt the area stays up so the
-    // failure is visible on the Messages pane.
-    const showWork = connected || connectAttempted;
-    els.workArea.hidden = !showWork;
-    el<HTMLDivElement>("splitter").hidden = !showWork;
+    // The tab bar (Messages/Results/Spooled Files/Connections/Settings) is
+    // always visible — Settings/Connections must be reachable pre-connect.
+    els.workArea.hidden = false;
+    el<HTMLDivElement>("splitter").hidden = false;
     el<HTMLSpanElement>("run-controls").hidden = !connected;
 }
 
@@ -1311,8 +1631,6 @@ async function doConnect(): Promise<void> {
     if (!app) return;
     els.connectError.hidden = true;
     els.btnConnect.disabled = true;
-    connectAttempted = true;
-    syncConnectionUi(); // reveal work area for the attempt
     try {
         const info = await app.Connect({
             host: el<HTMLInputElement>("in-host").value,
@@ -1910,7 +2228,8 @@ function toggleSavedHosts(): void {
         item.type = "button";
         item.className = "combo-item";
         item.dataset.profileName = p.name;
-        item.textContent = `${p.host} — ${p.user}${p.tls ? " (TLS)" : ""}${p.defaultSchema ? ` [${p.defaultSchema}]` : ""}`;
+        // Match the Connections pane list entry: "Name (user@host)".
+        item.textContent = `${p.name || p.host}  (${p.user}@${p.host})`;
         item.title = t("main.savedHostItemTitle", "Click to fill form; right-click for options");
         item.addEventListener("click", () => {
             fillFormFromProfile(p);

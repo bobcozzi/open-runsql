@@ -104,6 +104,8 @@ export interface SpooledFileInfo {
 export interface SpooledFileResult {
     kind: "spooledFiles";
     files: SpooledFileInfo[];
+    openMs: number;
+    iterateMs: number;
     elapsedMs: number;
 }
 
@@ -154,6 +156,16 @@ export interface ConnectionProfile {
     pinnedAt?: number;
 }
 
+export interface AppSettings {
+    spoolDownloadDir?: string;
+    fetchSize?: number;
+    autoOpenDownloads?: boolean; // legacy; superseded by spoolDblClickAction
+    spoolDblClickAction?: "" | "view" | "dlPdf" | "dlText" | "print"; // "" = view
+    defaultNaming?: "" | "sql" | "system"; // "" = sql
+    spoolMaxRows?: number; // 0/undefined = unlimited
+    confirmSpoolDelete?: boolean; // undefined = on
+}
+
 // Wails v3: the App service is exposed via generated bindings
 // (frontend/bindings/.../wails-app/app.js). App() returns the module.
 import * as appBindings from "../bindings/github.com/BobCozzi/open-runsql/wails-app/app.js";
@@ -173,8 +185,14 @@ export interface AppBinding {
     SaveSpooledFile(filename: string, base64Data: string): Promise<string>;
     PrintSpooledFile(filename: string, base64Data: string): Promise<string>;
     OpenSpooledFile(path: string): Promise<void>;
+    GetAppSettings(): Promise<AppSettings>;
+    SetSpoolDownloadDir(dir: string): Promise<void>;
+    SetAppSetting(key: string, value: string): Promise<void>;
+    OpenSpoolDownloadDir(): Promise<void>;
+    PickDirectory(title: string): Promise<string>;
     ListConnectionProfiles(): Promise<ConnectionProfile[]>;
     SaveConnectionProfile(p: ConnectionProfile): Promise<void>;
+    UpdateConnectionProfile(origName: string, p: ConnectionProfile): Promise<void>;
     DeleteConnectionProfile(name: string): Promise<void>;
     MoveConnectionProfileToTop(name: string): Promise<void>;
     DetachConnection(connectionId: string, title: string): Promise<void>;

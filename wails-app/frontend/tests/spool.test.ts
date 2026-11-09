@@ -6,6 +6,7 @@ import {
     DEFAULT_SPOOL_FILTERS,
     spoolCellText,
     spoolEmptyText,
+    spoolLoadingText,
 } from "../src/spool";
 import type { SpooledFileInfo } from "../src/types";
 
@@ -170,12 +171,24 @@ describe("createSpoolPane (DOM)", () => {
         pane.root.remove();
     });
 
+    it("shows a loading message while busy, not the no-match text", () => {
+        const pane = createSpoolPane({ onRefresh: () => { } });
+        document.body.appendChild(pane.root);
+        const empty = pane.root.querySelector<HTMLElement>(".spool-empty")!;
+        pane.setBusy(true);
+        expect(empty.hidden).toBe(false);
+        expect(empty.textContent).toBe(spoolLoadingText());
+        pane.setBusy(false);
+        expect(empty.textContent).toBe(spoolEmptyText());
+        pane.root.remove();
+    });
+
     it("clicking a sortable header sorts; clicking again reverses", () => {
         const pane = createSpoolPane({ onRefresh: () => { } });
         document.body.appendChild(pane.root);
         pane.setFiles([mkFile({ name: "B" }), mkFile({ name: "A" }), mkFile({ name: "C" })]);
         const nameTh = [...pane.root.querySelectorAll<HTMLElement>("th.sortable")]
-            .find((th) => th.textContent === "Name")!;
+            .find((th) => th.textContent === "SPLF Name")!;
         nameTh.click();
         let names = [...pane.root.querySelectorAll(".spool-body tr")]
             .map((tr) => tr.children[1].textContent);

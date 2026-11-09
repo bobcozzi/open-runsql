@@ -6,6 +6,81 @@
 // @ts-ignore: Unused imports
 import { Create as $Create } from "@wailsio/runtime";
 
+export class AppSettings {
+    /**
+     * Creates a new AppSettings instance.
+     * @param {Partial<AppSettings>} [$$source = {}] - The source object to create the AppSettings.
+     */
+    constructor($$source = {}) {
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["spoolDownloadDir"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {number | undefined}
+             */
+            this["fetchSize"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * legacy; superseded by SpoolDblClickAction
+             * @member
+             * @type {boolean | null | undefined}
+             */
+            this["autoOpenDownloads"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * view | dlPdf | dlText | print ("" = view)
+             * @member
+             * @type {string | undefined}
+             */
+            this["spoolDblClickAction"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * sql | system ("" = sql)
+             * @member
+             * @type {string | undefined}
+             */
+            this["defaultNaming"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * 0 = unlimited
+             * @member
+             * @type {number | undefined}
+             */
+            this["spoolMaxRows"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * nil = on
+             * @member
+             * @type {boolean | null | undefined}
+             */
+            this["confirmSpoolDelete"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AppSettings instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {AppSettings}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AppSettings(/** @type {Partial<AppSettings>} */($$parsedSource));
+    }
+}
+
 export class CmdXmlResult {
     /**
      * Creates a new CmdXmlResult instance.
@@ -1220,6 +1295,20 @@ export class SpooledFileResult {
              * @type {SpooledFileInfo[]}
              */
             this["files"] = [];
+        }
+        if (!("openMs" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["openMs"] = 0;
+        }
+        if (!("iterateMs" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["iterateMs"] = 0;
         }
         if (!("elapsedMs" in $$source)) {
             /**

@@ -10,7 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -162,6 +164,8 @@ type SpooledFileInfo struct {
 type SpooledFileResult struct {
 	Kind      string            `json:"kind"`
 	Files     []SpooledFileInfo `json:"files"`
+	OpenMs    int64             `json:"openMs"`
+	IterateMs int64             `json:"iterateMs"`
 	ElapsedMs int64             `json:"elapsedMs"`
 }
 
@@ -322,6 +326,190 @@ func profileStorePath() string {
 	return filepath.Join(dir, "ibmi-runsql", "connections.json")
 }
 
+// --- App settings (spool download dir, ...; persisted next to profiles) ---
+
+type AppSettings struct {
+	SpoolDownloadDir    string `json:"spoolDownloadDir,omitempty"`
+	FetchSize           int    `json:"fetchSize,omitempty"`
+	AutoOpenDownloads   *bool  `json:"autoOpenDownloads,omitempty"`   // legacy; superseded by SpoolDblClickAction
+	SpoolDblClickAction string `json:"spoolDblClickAction,omitempty"` // view | dlPdf | dlText | print ("" = view)
+	DefaultNaming       string `json:"defaultNaming,omitempty"`       // sql | system ("" = sql)
+	SpoolMaxRows        int    `json:"spoolMaxRows,omitempty"`        // 0 = unlimited
+	ConfirmSpoolDelete  *bool  `json:"confirmSpoolDelete,omitempty"`  // nil = on
+}
+
+func settingsStorePath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		dir = "."
+	}
+	return filepath.Join(dir, "ibmi-runsql", "settings.json")
+}
+
+func loadAppSettings() AppSettings {
+	var s AppSettings
+	data, err := os.ReadFile(settingsStorePath())
+	if err == nil {
+		_ = json.Unmarshal(data, &s)
+	}
+	return s
+}
+
+func saveAppSettings(s AppSettings) error {
+	path := settingsStorePath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+// GetAppSettings returns the persisted app settings for the Settings pane.
+func (a *App) GetAppSettings() (AppSettings, error) {
+	return loadAppSettings(), nil
+}
+
+// SetAppSetting persists one settings key. Unknown keys are rejected; values
+// are validated here so the frontend editors stay dumb.
+func (a *App) SetAppSetting(key, value string) error {
+	s := loadAppSettings()
+	switch key {
+	case "spoolDownloadDir":
+		d := strings.TrimSpace(value)
+		if d != "" {
+			info, err := os.Stat(d)
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() {
+				return fmt.Errorf("not a directory: %s", d)
+			}
+		}
+		s.SpoolDownloadDir = d
+	case "fetchSize":
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || n < 10 || n > 10000 {
+			return fmt.Errorf("fetch size must be 10-10000")
+		}
+		s.FetchSize = n
+	case "autoOpenDownloads":
+		on := strings.EqualFold(strings.TrimSpace(value), "on") || value == "true"
+		s.AutoOpenDownloads = &on
+	case "spoolDblClickAction":
+		switch strings.TrimSpace(value) {
+		case "", "view", "dlPdf", "dlText", "print":
+			s.SpoolDblClickAction = strings.TrimSpace(value)
+		default:
+			return fmt.Errorf("invalid double-click action: %s", value)
+		}
+	case "defaultNaming":
+		switch strings.TrimSpace(value) {
+		case "", "sql", "system":
+			s.DefaultNaming = strings.TrimSpace(value)
+		default:
+			return fmt.Errorf("invalid naming mode: %s", value)
+		}
+	case "spoolMaxRows":
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || n < 0 || n > 100000 {
+			return fmt.Errorf("spool row cap must be 0-100000 (0 = unlimited)")
+		}
+		s.SpoolMaxRows = n
+	case "confirmSpoolDelete":
+		on := strings.EqualFold(strings.TrimSpace(value), "on") || value == "true"
+		s.ConfirmSpoolDelete = &on
+	default:
+		return fmt.Errorf("unknown setting: %s", key)
+	}
+	return saveAppSettings(s)
+}
+
+// defaultDownloadsDir is the per-OS "Downloads" folder. Windows asks the shell
+// for the localized FOLDERID_Downloads (not always <profile>\Downloads); other
+// OSes fall back to ~/Downloads when it exists, else the home dir.
+func defaultDownloadsDir() string {
+	if runtime.GOOS == "windows" {
+		// guid known-folder FOLDERID_Downloads.
+		out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command",
+			`(New-Object -ComObject Shell.Application).NameSpace('shell:Downloads').Self.Path`).Output()
+		if err == nil {
+			if p := strings.TrimSpace(string(out)); p != "" {
+				return p
+			}
+		}
+		if pd := os.Getenv("USERPROFILE"); pd != "" {
+			return filepath.Join(pd, "Downloads")
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "."
+	}
+	dl := filepath.Join(home, "Downloads")
+	if info, err := os.Stat(dl); err == nil && info.IsDir() {
+		return dl
+	}
+	return home
+}
+
+// spoolDownloadDir resolves the target folder for spooled-file downloads.
+func spoolDownloadDir() string {
+	if d := strings.TrimSpace(loadAppSettings().SpoolDownloadDir); d != "" {
+		return d
+	}
+	return defaultDownloadsDir()
+}
+
+// openInFileManager shows a file or folder in the OS file manager.
+func openInFileManager(path string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", path)
+	case "windows":
+		// rundll32 url.dll,FileProtocolHandler handles both files and folders.
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", path)
+	default:
+		cmd = exec.Command("xdg-open", path)
+	}
+	return cmd.Start()
+}
+
+// OpenSpoolDownloadDir opens the configured spool download folder in the OS
+// file manager.
+func (a *App) OpenSpoolDownloadDir() error {
+	dir := spoolDownloadDir()
+	if _, err := os.Stat(dir); err != nil {
+		return err
+	}
+	return openInFileManager(dir)
+}
+
+// DefaultSpoolDownloadDir returns the OS default download folder (used by the
+// Settings folder editor's browse helper).
+func (a *App) DefaultSpoolDownloadDir() (string, error) {
+	return defaultDownloadsDir(), nil
+}
+
+// PickDirectory opens the OS-native folder picker (Finder/Explorer/Qt) and
+// returns the chosen path; empty string means canceled.
+func (a *App) PickDirectory(title string) (string, error) {
+	if a.app == nil || a.app.Dialog == nil {
+		return "", errors.New("dialogs unavailable")
+	}
+	dlg := a.app.Dialog.OpenFileWithOptions(&application.OpenFileDialogOptions{
+		CanChooseDirectories:            true,
+		CanChooseFiles:                  false,
+		CanCreateDirectories:            true,
+		TreatsFilePackagesAsDirectories: true,
+		Title:                           title,
+	})
+	return dlg.PromptForSingleSelection()
+}
+
 func loadProfiles() ([]ConnectionProfile, error) {
 	data, err := os.ReadFile(profileStorePath())
 	if errors.Is(err, os.ErrNotExist) {
@@ -425,6 +613,42 @@ func (a *App) DeleteConnectionProfile(name string) error {
 		}
 	}
 	return saveProfiles(out)
+}
+
+// UpdateConnectionProfile replaces the profile identified by origName with p
+// (rename-safe, unlike the host+user-keyed SaveConnectionProfile). Created-
+// order fields (LastUsedAt/PinnedAt) and a stored password are preserved.
+func (a *App) UpdateConnectionProfile(origName string, p ConnectionProfile) error {
+	p.Host = strings.TrimSpace(p.Host)
+	if p.Host == "" {
+		return errors.New("host is required")
+	}
+	p.Name = strings.TrimSpace(p.Name)
+	if p.Name == "" {
+		p.Name = p.Host
+	}
+	if !p.SavePassword {
+		p.PasswordB64 = ""
+	}
+	profiles, err := loadProfiles()
+	if err != nil {
+		return err
+	}
+	for i, existing := range profiles {
+		if strings.EqualFold(existing.Name, origName) || strings.EqualFold(existing.Host, origName) {
+			p.LastUsedAt = existing.LastUsedAt
+			p.PinnedAt = existing.PinnedAt
+			if p.SavePassword && p.PasswordB64 == "" {
+				p.PasswordB64 = existing.PasswordB64
+			}
+			profiles[i] = p
+			return saveProfiles(profiles)
+		}
+	}
+	// Unknown original name: treat as a new profile.
+	p.LastUsedAt = time.Now().Unix()
+	profiles = append(profiles, p)
+	return saveProfiles(profiles)
 }
 
 // MoveConnectionProfileToTop pins a profile at the top of the dropdown.
@@ -791,7 +1015,8 @@ func (a *App) ListSpooledFiles(req SpooledFileRequest) (*SpooledFileResult, erro
 		return nil, err
 	}
 	raw, _ := resp["result"].(map[string]any)
-	result := &SpooledFileResult{Kind: str2(raw, "kind"), ElapsedMs: int64Val(raw["elapsedMs"])}
+	result := &SpooledFileResult{Kind: str2(raw, "kind"), OpenMs: int64Val(raw["openMs"]),
+		IterateMs: int64Val(raw["iterateMs"]), ElapsedMs: int64Val(raw["elapsedMs"])}
 	for _, f := range anySlice(raw["files"]) {
 		if fm, ok := f.(map[string]any); ok {
 			result.Files = append(result.Files, SpooledFileInfo{
@@ -921,8 +1146,9 @@ func (a *App) ListOutputQueues(req OutputQueueListRequest) (*OutputQueueListResu
 	return &OutputQueueListResult{Queues: queues, ElapsedMs: int64Val(raw["elapsedMs"])}, nil
 }
 
-// SaveSpooledFile writes base64 content to ~/Downloads/<filename>, returning
-// the saved path. Filenames are sanitized to a safe basename.
+// SaveSpooledFile writes base64 content to the configured download folder
+// (~/Downloads by default), returning the saved path. Filenames are
+// sanitized to a safe basename.
 func (a *App) SaveSpooledFile(filename, base64Data string) (string, error) {
 	base := filepath.Base(strings.TrimSpace(filename))
 	if base == "" || base == "." {
@@ -932,11 +1158,7 @@ func (a *App) SaveSpooledFile(filename, base64Data string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("decode: %w", err)
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	out := filepath.Join(home, "Downloads", base)
+	out := filepath.Join(spoolDownloadDir(), base)
 	if err := os.WriteFile(out, raw, 0o600); err != nil {
 		return "", err
 	}
@@ -961,9 +1183,8 @@ func (a *App) PrintSpooledFile(filename, base64Data string) (string, error) {
 	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
 		return "", err
 	}
-	// `open` hands the PDF to the OS; Preview's print flow gives the dialog.
-	cmd := exec.Command("open", tmp)
-	if err := cmd.Start(); err != nil {
+	// OS file association handles the PDF (Preview's print flow on macOS).
+	if err := openInFileManager(tmp); err != nil {
 		return "", err
 	}
 	return tmp, nil
@@ -976,8 +1197,7 @@ func (a *App) OpenSpooledFile(path string) error {
 	if p == "" {
 		return errors.New("path is required")
 	}
-	cmd := exec.Command("open", p)
-	return cmd.Start()
+	return openInFileManager(p)
 }
 
 // classifyCLMessage ports commandEntryModel.ts classifyMessage(). Severity is

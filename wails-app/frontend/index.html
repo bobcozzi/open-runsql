@@ -113,6 +113,9 @@
             <button class="work-tab" data-pane="messages" type="button">Messages</button>
             <button class="work-tab active" data-pane="results" type="button">Results</button>
             <button class="work-tab" data-pane="spool" type="button" id="work-tab-spool">Spooled Files</button>
+            <button class="work-tab" data-pane="connections" type="button"
+                id="work-tab-connections">Connections</button>
+            <button class="work-tab" data-pane="settings" type="button" id="work-tab-settings">Settings</button>
             <!-- Prompter tabs are appended dynamically -->
             <span class="spacer"></span>
             <span id="status-text" class="status-inline"></span>
@@ -132,6 +135,8 @@
         <div class="work-pane" id="pane-messages" data-pane="messages" hidden>
             <ul id="message-list" class="message-list"></ul>
         </div>
+        <div class="work-pane" id="pane-connections" data-pane="connections" hidden></div>
+        <div class="work-pane" id="pane-settings" data-pane="settings" hidden></div>
 
         <!-- Prompter panes are appended dynamically -->
 
