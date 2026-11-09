@@ -18,10 +18,10 @@ The **Quick Connect** panel is at the top when no connection is open:
 
 Connections are remembered automatically and editable in the **Connections** tab: name, host, user, schema, naming, TLS, password, preload-spool, script, plus reorder (drag or A-Z), New/Duplicate/Delete, and **Connect in new Tab**.
 
-## Tabs
+## Connection Tabs
 
-- **+** in the tab strip opens a new connection tab. Each tab keeps its own script, results, and messages.
-- The bottom bar holds **Messages / Results / Spooled Files / Connections / Settings**. Connections and Settings work even when disconnected.
+- **+** in the Connection Tab opens a new connection tab. Each connection tab keeps its own script, results, and messages.
+- The bottom bar holds tabs for panels with other features, including: **Messages / Results / Spooled Files / Connections / Settings**. Connections and Settings work even when disconnected.
 
 ## The Scripts input area
 
