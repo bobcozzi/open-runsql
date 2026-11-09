@@ -32,12 +32,20 @@ build:
 #   ibmi-runsql-macIntel  macOS Intel (rare; build on demand)
 #   ibmi-runsql.exe       Windows amd64
 #   ibmi-runsql-linux     Linux amd64
-dist: frontend
+dist: frontend winres
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -tags production -ldflags "-s -w" -o ibmi-runsql.exe .
 	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -tags production -ldflags "-s -w" -o ibmi-runsql-linux .
 	GOOS=darwin GOARCH=arm64 go build -tags production -ldflags "-s -w" -o ibmi-runsql .
 	# Intel Mac (only when someone asks):
 	# GOOS=darwin GOARCH=amd64 go build -tags production -ldflags "-s -w" -o ibmi-runsql-macIntel .
+
+# Windows icon/manifest resources. The Go linker auto-embeds rsrc_windows_amd64.syso
+# (main package dir) when building GOOS=windows. Regenerated from packaging/windows/
+# on every dist build. Requires rsrc: go install github.com/akavel/rsrc@latest
+winres:
+	~/go/bin/rsrc -ico packaging/windows/app.ico -manifest packaging/windows/app.manifest \
+		-arch amd64 -o packaging/windows/rsrc_windows_amd64.syso
+	cp packaging/windows/rsrc_windows_amd64.syso .
 
 dev:
 	wails dev
@@ -50,12 +58,22 @@ frontend-test:
 go-test:
 	go test ./...
 
-# Packaged app for the current platform (.app on macOS, .exe dir on Windows,
-# binary + desktop file on Linux). Cross-compile is NOT supported for the
-# webview builds — build on each target OS (or in CI per-OS runners).
-package:
-	wails build
+# macOS .app bundle. Launching the bare binary from Finder makes macOS open it
+# in Terminal.app first; wrapping it in a bundle lets LaunchServices run it
+# directly (no terminal window). wails3 v3.1 'build' requires a Taskfile (this
+# project doesn't use one), so the bundle is assembled by hand: production
+# binary + Info.plist + ad-hoc codesign.
+package: bundle
+
+bundle: build
+	rm -rf $(APP).app
+	mkdir -p $(APP).app/Contents/MacOS $(APP).app/Contents/Resources
+	cp $(APP) $(APP).app/Contents/MacOS/
+	cp packaging/darwin/Info.plist $(APP).app/Contents/
+	cp packaging/darwin/AppIcon.icns $(APP).app/Contents/Resources/
+	codesign --force --deep --sign - $(APP).app
+	@echo "Built $(APP).app - launch with: open $(APP).app"
 
 clean:
-	rm -f $(APP) $(APP).exe
-	rm -rf frontend/dist build
+	rm -f $(APP) $(APP).exe $(APP)-linux rsrc_*.syso
+	rm -rf $(APP).app frontend/dist build

@@ -2,3 +2,6 @@ frontend/dist/
 frontend/node_modules/
 ibmi-runsql
 build/
+rsrc_*.syso
+ibmi-runsql.app/
+ibmi-runsql.app.zip
