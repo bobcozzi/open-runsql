@@ -17,6 +17,8 @@ function mkPane(profiles: ConnectionProfile[] = [P1, P2], over: Partial<Paramete
         load: () => Promise.resolve(profiles),
         save: vi.fn(() => Promise.resolve()),
         remove: vi.fn(() => Promise.resolve()),
+        // Vault: P1 has a stored password, P2 doesn't.
+        getPassword: vi.fn((name: string) => Promise.resolve(name === "Prod" ? "secret" : "")),
         onChanged: vi.fn(),
         ...over,
     };
@@ -25,6 +27,7 @@ function mkPane(profiles: ConnectionProfile[] = [P1, P2], over: Partial<Paramete
     return { pane, opts };
 }
 
+// Field order: Name, Host, User, Password, Schema, Naming, TLS, SavePw
 const fields = (root: HTMLElement) =>
     [...root.querySelectorAll<HTMLInputElement | HTMLSelectElement>(".conn-field input, .conn-field select")];
 
@@ -36,10 +39,14 @@ describe("connections pane", () => {
         });
         const selected = pane.root.querySelector(".settings-key.selected");
         expect(selected?.textContent).toContain("Prod");
-        const [name, host, user, schema, naming, tls, savePw] = fields(pane.root);
+        const [name, host, user, pw, schema, naming, tls, savePw] = fields(pane.root);
         expect((name as HTMLInputElement).value).toBe("Prod");
         expect((host as HTMLInputElement).value).toBe("prod.ibmi");
         expect((user as HTMLInputElement).value).toBe("COZZI");
+        // Password field fills asynchronously from the vault.
+        await vi.waitFor(() => {
+            expect((pw as HTMLInputElement).value).toBe("••••••••");
+        });
         expect((schema as HTMLInputElement).value).toBe("QIWS");
         expect((naming as HTMLSelectElement).value).toBe("system");
         expect((tls as HTMLInputElement).checked).toBe(true);
@@ -117,6 +124,61 @@ describe("connections pane", () => {
         pane.root.remove();
     });
 
+    it("typing a new password marks dirty and saves passwordB64", async () => {
+        const { pane, opts } = mkPane();
+        await vi.waitFor(() => {
+            expect(pane.root.querySelectorAll(".conn-keys .settings-key").length).toBe(2);
+        });
+        const [, , , pw] = fields(pane.root);
+        (pw as HTMLInputElement).value = "newsecret";
+        (pw as HTMLInputElement).dispatchEvent(new Event("input", { bubbles: true }));
+        [...pane.root.querySelectorAll<HTMLButtonElement>("button")]
+            .find((b) => b.textContent === "Save")!.click();
+        await vi.waitFor(() => {
+            expect(opts.save).toHaveBeenCalledWith("Prod", expect.objectContaining({
+                savePassword: true, passwordB64: btoa("newsecret"),
+            }));
+        });
+        pane.root.remove();
+    });
+
+    it("untouched masked password preserves the stored one (no passwordB64 sent)", async () => {
+        const { pane, opts } = mkPane();
+        await vi.waitFor(() => {
+            expect(pane.root.querySelectorAll(".conn-keys .settings-key").length).toBe(2);
+        });
+        const [name] = fields(pane.root);
+        (name as HTMLInputElement).value = "Prod2";
+        (name as HTMLInputElement).dispatchEvent(new Event("input", { bubbles: true }));
+        [...pane.root.querySelectorAll<HTMLButtonElement>("button")]
+            .find((b) => b.textContent === "Save")!.click();
+        await vi.waitFor(() => {
+            expect(opts.save).toHaveBeenCalledWith("Prod", expect.objectContaining({
+                name: "Prod2", savePassword: true, passwordB64: undefined,
+            }));
+        });
+        pane.root.remove();
+    });
+
+    it("Reset restores the masked stored password after typing", async () => {
+        const { pane } = mkPane();
+        await vi.waitFor(() => {
+            expect(pane.root.querySelectorAll(".conn-keys .settings-key").length).toBe(2);
+        });
+        const [, , , pw] = fields(pane.root);
+        await vi.waitFor(() => {
+            expect((pw as HTMLInputElement).value).toBe("••••••••");
+        });
+        (pw as HTMLInputElement).value = "typed-something";
+        (pw as HTMLInputElement).dispatchEvent(new Event("input", { bubbles: true }));
+        [...pane.root.querySelectorAll<HTMLButtonElement>("button")]
+            .find((b) => b.textContent === "Reset")!.click();
+        await vi.waitFor(() => {
+            expect((pw as HTMLInputElement).value).toBe("••••••••");
+        });
+        pane.root.remove();
+    });
+
     it("Save sends the form profile keyed by the original name", async () => {
         const { pane, opts } = mkPane();
         await vi.waitFor(() => {
@@ -147,6 +209,11 @@ describe("connections pane", () => {
         expect((name as HTMLInputElement).value).toBe("");
         (host as HTMLInputElement).value = "new.ibmi";
         (user as HTMLInputElement).value = "NEWU";
+        // New profile with a typed password saves it when Save-password is on.
+        const pw = pane.root.querySelector<HTMLInputElement>(".conn-field input[type='password']")!;
+        pw.value = "pw1";
+        const savePw = pane.root.querySelector<HTMLInputElement>(".conn-field input[type='checkbox']:not([hidden])");
+        void savePw;
         [...pane.root.querySelectorAll<HTMLButtonElement>("button")]
             .find((b) => b.textContent === "Save")!.click();
         await vi.waitFor(() => {
@@ -166,6 +233,52 @@ describe("connections pane", () => {
         await vi.waitFor(() => {
             expect(confirm).toHaveBeenCalled();
             expect(opts.remove).toHaveBeenCalledWith("Prod");
+        });
+        pane.root.remove();
+    });
+
+    it("drag-drop reorders and persists the new sequence", async () => {
+        const onReorder = vi.fn(() => Promise.resolve());
+        const { pane, opts } = mkPane([P1, P2], { onReorder });
+        await vi.waitFor(() => {
+            expect(pane.root.querySelectorAll(".conn-keys .settings-key").length).toBe(2);
+        });
+        const items = pane.root.querySelectorAll<HTMLElement>(".conn-keys .settings-key");
+        // jsdom lacks DataTransfer/DragEvent; stub what our handlers call.
+        const dt = {
+            getData: () => "Dev",
+            setData: () => { /* no-op */ },
+            setDragImage: () => { /* no-op */ },
+        } as unknown as DataTransfer;
+        const fire = (type: string, el: HTMLElement) => {
+            const ev = new Event(type, { bubbles: true, cancelable: true });
+            (ev as unknown as { dataTransfer: DataTransfer }).dataTransfer = dt;
+            el.dispatchEvent(ev);
+        };
+        fire("dragstart", items[1]);
+        fire("drop", items[0]);
+        await vi.waitFor(() => {
+            expect(onReorder).toHaveBeenCalledWith(["Dev", "Prod"]);
+            expect(opts.onChanged).toHaveBeenCalled();
+        });
+        pane.root.remove();
+    });
+
+    it("A-Z sort button toggles direction and persists", async () => {
+        const onReorder = vi.fn(() => Promise.resolve());
+        const { pane } = mkPane([P1, P2], { onReorder });
+        await vi.waitFor(() => {
+            expect(pane.root.querySelectorAll(".conn-keys .settings-key").length).toBe(2);
+        });
+        const sortBtn = [...pane.root.querySelectorAll<HTMLButtonElement>(".conn-list-footer button")]
+            .find((b) => b.textContent === "A-Z")!;
+        sortBtn.click();
+        await vi.waitFor(() => {
+            expect(onReorder).toHaveBeenCalledWith(["Dev", "Prod"]);
+        });
+        sortBtn.click();
+        await vi.waitFor(() => {
+            expect(onReorder).toHaveBeenLastCalledWith(["Prod", "Dev"]);
         });
         pane.root.remove();
     });

@@ -151,9 +151,13 @@ export interface ConnectionProfile {
     naming?: string;
     tls: boolean;
     savePassword?: boolean;
+    preloadSpool?: boolean; // undefined = on
+    saveScript?: boolean; // undefined = on ("Save SQL/CL script between sessions")
+    script?: string; // SQL/CL text saved with the profile
     passwordB64?: string;
     lastUsedAt?: number;
     pinnedAt?: number;
+    sortOrder?: number;
 }
 
 export interface AppSettings {
@@ -183,8 +187,13 @@ export interface AppBinding {
     ListOutputQueues(req: { connectionId: string; nameFilter: string; libraryFilter: string; limit: number }): Promise<OutputQueueListResult>;
     GetSpooledFileData(req: SpooledFileTarget & { format: string }): Promise<SpooledFileDataResult>;
     SaveSpooledFile(filename: string, base64Data: string): Promise<string>;
+    SaveFileAs(filename: string, base64Data: string, filterLabel: string, filterPattern: string): Promise<string>;
+    OpenFileAs(filterLabel: string, filterPattern: string): Promise<string>;
     PrintSpooledFile(filename: string, base64Data: string): Promise<string>;
     OpenSpooledFile(path: string): Promise<void>;
+    ListStatementHistory(connectionId: string): Promise<{ text: string; at: number }[]>;
+    AddStatementHistory(connectionId: string, text: string): Promise<{ text: string; at: number }[]>;
+    DeleteStatementHistory(connectionId: string, index: number): Promise<{ text: string; at: number }[]>;
     GetAppSettings(): Promise<AppSettings>;
     SetSpoolDownloadDir(dir: string): Promise<void>;
     SetAppSetting(key: string, value: string): Promise<void>;
@@ -192,7 +201,9 @@ export interface AppBinding {
     PickDirectory(title: string): Promise<string>;
     ListConnectionProfiles(): Promise<ConnectionProfile[]>;
     SaveConnectionProfile(p: ConnectionProfile): Promise<void>;
+    GetProfilePassword(name: string): Promise<string>;
     UpdateConnectionProfile(origName: string, p: ConnectionProfile): Promise<void>;
+    ReorderConnectionProfiles(names: string[]): Promise<void>;
     DeleteConnectionProfile(name: string): Promise<void>;
     MoveConnectionProfileToTop(name: string): Promise<void>;
     DetachConnection(connectionId: string, title: string): Promise<void>;
@@ -200,6 +211,7 @@ export interface AppBinding {
     ListDetached(): Promise<string[]>;
     GetWorkspace(connectionId: string): Promise<unknown>;
     ListWorkspaces(): Promise<unknown[]>;
+    GetConnectionIdentity(connectionId: string): Promise<{ host: string; user: string }>;
     UpdateEditorText(connectionId: string, text: string): Promise<void>;
     UpdateMessagesHTML(connectionId: string, html: string): Promise<void>;
     UpdateStatusText(connectionId: string, text: string): Promise<void>;

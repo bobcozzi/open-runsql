@@ -369,6 +369,45 @@ export class ConnectResponse {
 }
 
 /**
+ * ConnectionIdentity is the live host/user for a connection (used by the
+ * frontend to key per-connection state like the saved script).
+ */
+export class ConnectionIdentity {
+    /**
+     * Creates a new ConnectionIdentity instance.
+     * @param {Partial<ConnectionIdentity>} [$$source = {}] - The source object to create the ConnectionIdentity.
+     */
+    constructor($$source = {}) {
+        if (!("host" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["host"] = "";
+        }
+        if (!("user" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["user"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ConnectionIdentity instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {ConnectionIdentity}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ConnectionIdentity(/** @type {Partial<ConnectionIdentity>} */($$parsedSource));
+    }
+}
+
+/**
  * ConnectionProfile is a saved connection. Password is stored base64-obscured
  * only when the user opted in via the "Save password" checkbox — this is
  * obscurity, not encryption, for trusted/limited-access environments.
@@ -430,6 +469,30 @@ export class ConnectionProfile {
         }
         if (/** @type {any} */(false)) {
             /**
+             * PreloadSpool: fetch the spooled-file list at connect (default on).
+             * @member
+             * @type {boolean | null | undefined}
+             */
+            this["preloadSpool"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * Script: SQL/CL text saved with the profile; restored into the editor on
+             * connect when set. SaveScript gates the auto-save (default on).
+             * @member
+             * @type {string | undefined}
+             */
+            this["script"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | null | undefined}
+             */
+            this["saveScript"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
              * @member
              * @type {string | undefined}
              */
@@ -449,6 +512,15 @@ export class ConnectionProfile {
              * @type {number | undefined}
              */
             this["pinnedAt"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * SortOrder is the user's explicit list position (lower = earlier). Set by
+             * drag reorder and A-Z sort in the Connections pane; 0 = not ordered.
+             * @member
+             * @type {number | undefined}
+             */
+            this["sortOrder"] = undefined;
         }
 
         Object.assign(this, $$source);
@@ -546,6 +618,41 @@ export class GetCmdXmlRequest {
     static createFrom($$source = {}) {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new GetCmdXmlRequest(/** @type {Partial<GetCmdXmlRequest>} */($$parsedSource));
+    }
+}
+
+export class HistoryEntry {
+    /**
+     * Creates a new HistoryEntry instance.
+     * @param {Partial<HistoryEntry>} [$$source = {}] - The source object to create the HistoryEntry.
+     */
+    constructor($$source = {}) {
+        if (!("text" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["text"] = "";
+        }
+        if (!("at" in $$source)) {
+            /**
+             * @member
+             * @type {number}
+             */
+            this["at"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HistoryEntry instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {HistoryEntry}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new HistoryEntry(/** @type {Partial<HistoryEntry>} */($$parsedSource));
     }
 }
 

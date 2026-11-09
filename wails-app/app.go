@@ -239,10 +239,19 @@ type ConnectionProfile struct {
 	Naming        string `json:"naming,omitempty"`
 	TLS           bool   `json:"tls"`
 	SavePassword  bool   `json:"savePassword,omitempty"`
-	PasswordB64   string `json:"passwordB64,omitempty"`
-	LastUsedAt    int64  `json:"lastUsedAt"`
+	// PreloadSpool: fetch the spooled-file list at connect (default on).
+	PreloadSpool *bool `json:"preloadSpool,omitempty"`
+	// Script: SQL/CL text saved with the profile; restored into the editor on
+	// connect when set. SaveScript gates the auto-save (default on).
+	Script      string `json:"script,omitempty"`
+	SaveScript  *bool  `json:"saveScript,omitempty"`
+	PasswordB64 string `json:"passwordB64,omitempty"`
+	LastUsedAt  int64  `json:"lastUsedAt"`
 	// PinnedAt is set by "Move to top": the stable list position override.
 	PinnedAt int64 `json:"pinnedAt,omitempty"`
+	// SortOrder is the user's explicit list position (lower = earlier). Set by
+	// drag reorder and A-Z sort in the Connections pane; 0 = not ordered.
+	SortOrder int `json:"sortOrder,omitempty"`
 }
 
 // profileOrderThreshold: at or below this many saved profiles the dropdown
@@ -272,6 +281,24 @@ type connState struct {
 	user      string
 	cursorID  string
 	hasCursor bool
+}
+
+// ConnectionIdentity is the live host/user for a connection (used by the
+// frontend to key per-connection state like the saved script).
+type ConnectionIdentity struct {
+	Host string `json:"host"`
+	User string `json:"user"`
+}
+
+// GetConnectionIdentity returns the live host/user for a connection.
+func (a *App) GetConnectionIdentity(connectionID string) (ConnectionIdentity, error) {
+	a.mu.Lock()
+	c := a.connections[connectionID]
+	a.mu.Unlock()
+	if c == nil {
+		return ConnectionIdentity{}, errors.New("not connected")
+	}
+	return ConnectionIdentity{Host: c.host, User: c.user}, nil
 }
 
 func NewApp(jar string) *App {
@@ -527,14 +554,21 @@ func loadProfiles() ([]ConnectionProfile, error) {
 }
 
 // sortProfiles orders profiles for the dropdown:
-//   - Pinned (Move-to-top) entries always come first, most recently pinned first.
-//   - With <= profileOrderThreshold profiles, the rest keep creation order (FILO:
-//     first saved stays first; new connections append) so a handful of
-//     connections never becomes a moving target.
+//   - Explicit SortOrder (drag/A-Z in the Connections pane) wins outright.
+//   - Pinned (Move-to-top) entries come next, most recently pinned first.
+//   - With <= profileOrderThreshold unordered profiles, the rest keep creation
+//     order (FILO) so a handful of connections never becomes a moving target.
 //   - Above the threshold, the rest stay MRU (LastUsedAt desc); the frontend
 //     splits that into recently-used (top 5) + separator + remainder.
 func sortProfiles(profiles []ConnectionProfile) {
 	sort.SliceStable(profiles, func(i, j int) bool {
+		soi, soj := profiles[i].SortOrder, profiles[j].SortOrder
+		if (soi > 0) != (soj > 0) {
+			return soi > 0
+		}
+		if soi > 0 && soj > 0 {
+			return soi < soj
+		}
 		pi, pj := profiles[i].PinnedAt, profiles[j].PinnedAt
 		if (pi > 0) != (pj > 0) {
 			return pi > 0
@@ -549,6 +583,30 @@ func sortProfiles(profiles []ConnectionProfile) {
 	})
 }
 
+// ReorderConnectionProfiles applies an explicit list order: names are the
+// connection names in the desired sequence; each gets SortOrder 1..N. Profiles
+// not named keep their relative order after the named ones. Clears PinnedAt
+// (explicit order replaces pinning).
+func (a *App) ReorderConnectionProfiles(names []string) error {
+	profiles, err := loadProfiles()
+	if err != nil {
+		return err
+	}
+	rank := map[string]int{}
+	for i, n := range names {
+		rank[strings.ToLower(strings.TrimSpace(n))] = i + 1
+	}
+	for i := range profiles {
+		if r, ok := rank[strings.ToLower(profiles[i].Name)]; ok {
+			profiles[i].SortOrder = r
+			profiles[i].PinnedAt = 0
+		} else {
+			profiles[i].SortOrder = 0
+		}
+	}
+	return saveProfiles(profiles)
+}
+
 func saveProfiles(profiles []ConnectionProfile) error {
 	path := profileStorePath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -561,9 +619,72 @@ func saveProfiles(profiles []ConnectionProfile) error {
 	return os.WriteFile(path, data, 0o600)
 }
 
-// ListConnectionProfiles returns all saved connection profiles.
+// ListConnectionProfiles returns all saved connection profiles. Legacy
+// base64 passwords are migrated into the OS credential vault on first read
+// and scrubbed from the file when migration succeeds.
 func (a *App) ListConnectionProfiles() ([]ConnectionProfile, error) {
-	return loadProfiles()
+	profiles, err := loadProfiles()
+	if err != nil {
+		return nil, err
+	}
+	migrated := false
+	for i := range profiles {
+		if migrateLegacyPassword(&profiles[i]) {
+			migrated = true
+		}
+	}
+	if migrated {
+		_ = saveProfiles(profiles)
+	}
+	return profiles, nil
+}
+
+// GetProfilePassword returns the stored password for a profile (OS vault
+// first, legacy base64 second). Used by the Quick Connect form to prefill.
+func (a *App) GetProfilePassword(name string) (string, error) {
+	profiles, err := loadProfiles()
+	if err != nil {
+		return "", err
+	}
+	for _, p := range profiles {
+		if strings.EqualFold(p.Name, name) || strings.EqualFold(p.Host, name) {
+			if pw := loadPassword(p.Host, p.User); pw != "" {
+				return pw, nil
+			}
+			// Legacy in-file base64 (pre-vault, or no vault on this machine).
+			if p.PasswordB64 != "" {
+				raw, err := base64.StdEncoding.DecodeString(p.PasswordB64)
+				if err == nil {
+					return string(raw), nil
+				}
+			}
+			return "", nil
+		}
+	}
+	return "", nil
+}
+
+// mergeProfile folds p into profiles: host+user match replaces in place,
+// preserving name/ordering/password when p carries only the auto-save
+// defaults (name == host, no password). Returns (updated slice, replaced).
+func mergeProfile(profiles []ConnectionProfile, p ConnectionProfile) ([]ConnectionProfile, bool) {
+	for i, existing := range profiles {
+		if strings.EqualFold(existing.Host, p.Host) && strings.EqualFold(existing.User, p.User) {
+			// Password carries over whenever the incoming profile doesn't
+			// explicitly clear it (SavePassword=false means "don't store").
+			if p.PasswordB64 == "" && p.SavePassword {
+				p.PasswordB64 = existing.PasswordB64
+			}
+			if strings.EqualFold(p.Name, p.Host) && !strings.EqualFold(existing.Name, existing.Host) {
+				p.Name = existing.Name
+			}
+			p.PinnedAt = existing.PinnedAt
+			p.SortOrder = existing.SortOrder
+			profiles[i] = p
+			return profiles, true
+		}
+	}
+	return append(profiles, p), false
 }
 
 // SaveConnectionProfile upserts a profile keyed by host+user, refreshing
@@ -578,25 +699,24 @@ func (a *App) SaveConnectionProfile(p ConnectionProfile) error {
 		p.Name = p.Host
 	}
 	p.LastUsedAt = time.Now().Unix()
+	// Vault first: passwords live in the OS credential store, not the file.
+	if p.SavePassword && p.PasswordB64 != "" {
+		raw, err := base64.StdEncoding.DecodeString(p.PasswordB64)
+		if err == nil && len(raw) > 0 {
+			if storePassword(p.Host, p.User, string(raw)) == nil {
+				p.PasswordB64 = "" // scrub the in-file copy
+			}
+		}
+	}
 	if !p.SavePassword {
 		p.PasswordB64 = ""
+		deletePassword(p.Host, p.User)
 	}
 	profiles, err := loadProfiles()
 	if err != nil {
 		return err
 	}
-	// Preserve a previously saved password when the new save carries none
-	// but still has savePassword set (e.g. auto-save with empty field).
-	for i, existing := range profiles {
-		if strings.EqualFold(existing.Host, p.Host) && strings.EqualFold(existing.User, p.User) {
-			if p.SavePassword && p.PasswordB64 == "" {
-				p.PasswordB64 = existing.PasswordB64
-			}
-			profiles[i] = p
-			return saveProfiles(profiles)
-		}
-	}
-	profiles = append(profiles, p)
+	profiles, _ = mergeProfile(profiles, p)
 	return saveProfiles(profiles)
 }
 
@@ -608,9 +728,11 @@ func (a *App) DeleteConnectionProfile(name string) error {
 	}
 	out := profiles[:0]
 	for _, p := range profiles {
-		if !strings.EqualFold(p.Name, name) && !strings.EqualFold(p.Host, name) {
-			out = append(out, p)
+		if strings.EqualFold(p.Name, name) || strings.EqualFold(p.Host, name) {
+			deletePassword(p.Host, p.User) // scrub the vault too
+			continue
 		}
+		out = append(out, p)
 	}
 	return saveProfiles(out)
 }
@@ -638,8 +760,33 @@ func (a *App) UpdateConnectionProfile(origName string, p ConnectionProfile) erro
 		if strings.EqualFold(existing.Name, origName) || strings.EqualFold(existing.Host, origName) {
 			p.LastUsedAt = existing.LastUsedAt
 			p.PinnedAt = existing.PinnedAt
-			if p.SavePassword && p.PasswordB64 == "" {
-				p.PasswordB64 = existing.PasswordB64
+			p.SortOrder = existing.SortOrder
+			// Guard: never let an update collapse a custom display name back to
+			// the host (auto-save/script-save callers rebuild from the form).
+			if strings.EqualFold(p.Name, p.Host) && !strings.EqualFold(existing.Name, existing.Host) {
+				p.Name = existing.Name
+			}
+			// Vault first; carry the legacy in-file password only when the vault
+			// has nothing (no vault on this machine).
+			if !p.SavePassword {
+				deletePassword(existing.Host, existing.User)
+				if existing.Host != p.Host || existing.User != p.User {
+					deletePassword(p.Host, p.User)
+				}
+				p.PasswordB64 = ""
+			} else if p.PasswordB64 != "" {
+				raw, err := base64.StdEncoding.DecodeString(p.PasswordB64)
+				if err == nil && len(raw) > 0 {
+					if storePassword(p.Host, p.User, string(raw)) == nil {
+						p.PasswordB64 = ""
+					}
+				}
+			} else {
+				// No new password typed: preserve the legacy in-file copy only
+				// when the vault is empty for this profile.
+				if loadPassword(p.Host, p.User) == "" {
+					p.PasswordB64 = existing.PasswordB64
+				}
 			}
 			profiles[i] = p
 			return saveProfiles(profiles)
@@ -1163,6 +1310,63 @@ func (a *App) SaveSpooledFile(filename, base64Data string) (string, error) {
 		return "", err
 	}
 	return out, nil
+}
+
+// SaveFileAs prompts with the OS-native Save dialog (default name/folder, file
+// filter for the chosen format) and writes base64 content to the chosen path.
+// Returns "" when the user cancels.
+func (a *App) SaveFileAs(filename, base64Data, filterLabel, filterPattern string) (string, error) {
+	if a.app == nil || a.app.Dialog == nil {
+		return "", errors.New("dialogs unavailable")
+	}
+	raw, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		return "", fmt.Errorf("decode: %w", err)
+	}
+	opts := &application.SaveFileDialogOptions{
+		CanCreateDirectories: true,
+		Title:                "Save Results",
+		Filename:             filename,
+		Directory:            spoolDownloadDir(),
+	}
+	if filterLabel != "" && filterPattern != "" {
+		opts.Filters = []application.FileFilter{{DisplayName: filterLabel, Pattern: filterPattern}}
+	}
+	dlg := a.app.Dialog.SaveFileWithOptions(opts)
+	path, err := dlg.PromptForSingleSelection()
+	if err != nil || strings.TrimSpace(path) == "" {
+		return "", err // canceled or failed
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// OpenFileAs prompts with the OS-native Open dialog and returns the file's
+// contents as text (for loading a .sql script into the editor). "" = canceled.
+func (a *App) OpenFileAs(filterLabel, filterPattern string) (string, error) {
+	if a.app == nil || a.app.Dialog == nil {
+		return "", errors.New("dialogs unavailable")
+	}
+	opts := &application.OpenFileDialogOptions{
+		CanChooseFiles:       true,
+		CanChooseDirectories: false,
+		Title:                "Open SQL Script",
+	}
+	if filterLabel != "" && filterPattern != "" {
+		opts.Filters = []application.FileFilter{{DisplayName: filterLabel, Pattern: filterPattern}}
+	}
+	dlg := a.app.Dialog.OpenFileWithOptions(opts)
+	path, err := dlg.PromptForSingleSelection()
+	if err != nil || strings.TrimSpace(path) == "" {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // PrintSpooledFile saves the PDF bytes to a temp file and opens it with the OS

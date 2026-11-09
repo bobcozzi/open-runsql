@@ -2,6 +2,24 @@
 // (no CCSID decode) so Presentation Position column bytes keep their exact
 // values; we decode EBCDIC text bytes ourselves.
 
+/** Format the JDBC database product version as IBM release shorthand.
+ * The driver returns e.g. "07.03.0000 V7R3m0" (dotted build + embedded VxRymz
+ * with lowercase m) — collapse to "V7R3M0". Also handles bare "07.03.000" and
+ * bare "V7R3m0". Falls back to the raw string otherwise. */
+export function formatOsVersion(v: string): string {
+    const s = v.trim();
+    // Embedded shorthand wins: "07.03.0000 V7R3m0" -> "V7R3M0".
+    const vrm = /V(\d+)R(\d+)[mM](\d+)/i.exec(s);
+    if (vrm) {
+        return `V${Number(vrm[1])}R${Number(vrm[2])}M${Number(vrm[3])}`;
+    }
+    const dotted = /^(\d{2})\.(\d{2})\.(\d{3,4})$/.exec(s);
+    if (dotted) {
+        return `V${Number(dotted[1])}R${Number(dotted[2])}M${Number(dotted[3])}`;
+    }
+    return s;
+}
+
 // EBCDIC Cp037 -> char for the invariant + common range. Falls back to space
 // for bytes without a mapping we care about (control codes are handled, not
 // decoded).

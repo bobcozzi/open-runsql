@@ -12,9 +12,15 @@ export interface ConnectionsPaneOptions {
     /** origName-keyed replace (rename-safe); empty origName = create. */
     save: (origName: string, p: ConnectionProfile) => Promise<void>;
     remove: (name: string) => Promise<void>;
+    /** Fetch the stored password for a profile (OS vault). "" = none. */
+    getPassword: (name: string) => Promise<string>;
     /** Called after any mutation so the connect panel dropdown refreshes. */
     onChanged?: () => void;
     onError?: (message: string) => void;
+    /** Connect-in-new-tab action for the selected profile. */
+    onConnect?: (p: ConnectionProfile) => void;
+    /** Persist an explicit list order (names in sequence). */
+    onReorder?: (names: string[]) => Promise<void>;
     /** Test hook / native confirm wrapper. */
     confirm?: (message: string) => boolean;
 }
@@ -54,6 +60,15 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
     const inHost = input("text");
     const inUser = input("text");
     const inSchema = input("text");
+    const inPassword = document.createElement("input");
+    inPassword.type = "password";
+    inPassword.autocomplete = "off";
+    inPassword.spellcheck = false;
+    inPassword.autocapitalize = "off";
+    inPassword.className = "settings-input";
+    // True when a password is stored for the selected profile and the field
+    // holds no user edit. Typed text replaces the stored password on save.
+    let passwordStored = false;
     const inNaming = document.createElement("select");
     for (const [v, label] of [["sql", t("conn.namingSql", "SQL naming")], ["system", t("conn.namingSystem", "System naming")]] as const) {
         const o = document.createElement("option");
@@ -65,6 +80,14 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
     inTls.type = "checkbox";
     const inSavePw = document.createElement("input");
     inSavePw.type = "checkbox";
+    const inPreload = document.createElement("input");
+    inPreload.type = "checkbox";
+    const inSaveScript = document.createElement("input");
+    inSaveScript.type = "checkbox";
+    const inScript = document.createElement("textarea");
+    inScript.className = "settings-input conn-script";
+    inScript.spellcheck = false;
+    inScript.rows = 6;
 
     function input(type: string): HTMLInputElement {
         const i = document.createElement("input");
@@ -92,32 +115,41 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
     row("conn.name", "Name", inName);
     row("conn.host", "Host", inHost);
     row("conn.user", "User", inUser);
+    row("conn.password", "Password", inPassword);
     row("conn.schema", "Default schema", inSchema);
     row("conn.naming", "Naming", inNaming);
     row("conn.tls", "Secure (TLS)", inTls);
     row("conn.savePassword", "Save password", inSavePw);
+    row("conn.preloadSpool", "Preload spooled files at connect", inPreload);
+    row("conn.saveScript", "Save SQL/CL script between sessions", inSaveScript);
+    row("conn.script", "SQL/CL script", inScript);
 
     const note = document.createElement("div");
     note.className = "settings-desc";
-    note.textContent = t("conn.pwNote", "Passwords are not shown here. Keeping \"Save password\" checked preserves the stored password; unchecking clears it.");
+    note.textContent = t("conn.pwNote", "Passwords are stored in the OS credential vault (never in the profile file). A stored password shows as dots — type over it to replace. \"Save password\" off clears it.");
     form.appendChild(note);
 
     const btnRow = document.createElement("div");
     btnRow.className = "settings-editor-row conn-buttons";
     const btnSave = button(t("conn.save", "Save"), "btn primary");
     const btnReset = button(t("conn.reset", "Reset"), "btn");
+    const btnConnectTab = button(t("conn.connectTab", "Connect in new Tab"), "btn");
     const btnDelete = button(t("conn.delete", "Delete"), "btn danger");
     btnRow.appendChild(btnSave);
     btnRow.appendChild(btnReset);
+    btnRow.appendChild(btnConnectTab);
     btnRow.appendChild(btnDelete);
     form.appendChild(btnRow);
 
-    const listFooter = document.createElement("div");
-    listFooter.className = "conn-list-footer";
+    // New/Duplicate/Sort live at the bottom of the list column.
     const btnNew = button(t("conn.new", "New"), "btn");
     const btnDuplicate = button(t("conn.duplicate", "Duplicate"), "btn");
-    listFooter.appendChild(btnNew);
-    listFooter.appendChild(btnDuplicate);
+    const btnSort = button("A-Z", "btn conn-sort");
+    btnSort.title = t("conn.sortTitle", "Sort by name (toggles ascending/descending)");
+    listFooterEl.className = "conn-list-footer";
+    listFooterEl.appendChild(btnNew);
+    listFooterEl.appendChild(btnDuplicate);
+    listFooterEl.appendChild(btnSort);
 
     function button(text: string, cls: string): HTMLButtonElement {
         const b = document.createElement("button");
@@ -134,15 +166,19 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
     dirtyMarker.hidden = true;
     title.appendChild(dirtyMarker);
 
-    for (const field of [inName, inHost, inUser, inSchema]) {
+    for (const field of [inName, inHost, inUser, inSchema, inPassword, inScript]) {
         field.addEventListener("input", () => { dirtyMarker.hidden = false; });
     }
     inNaming.addEventListener("change", () => { dirtyMarker.hidden = false; });
     inTls.addEventListener("change", () => { dirtyMarker.hidden = false; });
     inSavePw.addEventListener("change", () => { dirtyMarker.hidden = false; });
+    inPreload.addEventListener("change", () => { dirtyMarker.hidden = false; });
+    inSaveScript.addEventListener("change", () => { dirtyMarker.hidden = false; });
 
     function formProfile(): ConnectionProfile {
         const host = inHost.value.trim();
+        const typed = inPassword.value;
+        const pwChanged = typed !== "" && !(passwordStored && typed === STORED_MASK);
         return {
             name: inName.value.trim() || host,
             host,
@@ -150,28 +186,62 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
             defaultSchema: inSchema.value.trim(),
             naming: inNaming.value,
             tls: inTls.checked,
+            preloadSpool: inPreload.checked,
+            saveScript: inSaveScript.checked,
+            script: inScript.value,
+            // Keeping "Save password" on preserves the stored password unless a
+            // new one was typed; turning it off clears it.
             savePassword: inSavePw.checked,
+            passwordB64: pwChanged && inSavePw.checked ? btoa(typed) : undefined,
         };
     }
 
+    // Mask shown when a password is stored; matched on save to distinguish
+    // "unchanged" from "user typed dots".
+    const STORED_MASK = "••••••••";
+
     function fill(p: ConnectionProfile | null): void {
         origName = p?.name ?? "";
-        title.firstChild!.textContent = p ? (p.name || p.host) : t("conn.newTitle", "New connection");
+        // Always render the title text (rebuild the leading text node — the
+        // dirty-marker span stays put after it).
+        const label = p ? (p.name || p.host) : t("conn.newTitle", "New connection");
+        if (title.firstChild && title.firstChild.nodeType === Node.TEXT_NODE) {
+            title.firstChild.textContent = label;
+        } else {
+            title.insertBefore(document.createTextNode(label), title.firstChild);
+        }
         inName.value = p?.name ?? "";
         inHost.value = p?.host ?? "";
         inUser.value = p?.user ?? "";
+        inPassword.value = "";
+        inPassword.placeholder = "";
+        passwordStored = false;
+        if (p?.savePassword && p.name) {
+            void opts.getPassword(p.name).then((pw) => {
+                // Only apply if the form still shows this profile.
+                if (origName !== p.name) return;
+                passwordStored = pw !== "";
+                inPassword.value = passwordStored ? STORED_MASK : "";
+            }).catch(() => { /* vault miss: leave empty */ });
+        }
         inSchema.value = p?.defaultSchema ?? "";
         inNaming.value = p?.naming || "sql";
         inTls.checked = !!p?.tls;
         inSavePw.checked = !!p?.savePassword;
+        inPreload.checked = p?.preloadSpool !== false;
+        inSaveScript.checked = p?.saveScript !== false;
+        inScript.value = p?.script ?? "";
         btnDelete.hidden = !p;
         btnDuplicate.disabled = !p;
+        btnConnectTab.disabled = !p;
         dirtyMarker.hidden = true;
     }
 
     function markSelected(name: string): void {
         for (const li of Array.from(list.querySelectorAll<HTMLElement>(".settings-key"))) {
-            li.classList.toggle("selected", li.dataset.profileName === name);
+            const on = li.dataset.profileName === name;
+            li.classList.toggle("selected", on);
+            li.tabIndex = on ? 0 : -1;
         }
     }
 
@@ -180,6 +250,16 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
         if (!dirtyMarker.hidden) await save();
         if (dirtyMarker.hidden) fill(p);
         markSelected(origName);
+        // Focus the selected row (jsdom lacks CSS.escape; fall back to a
+        // simple match when it isn't available).
+        const focusSel = typeof CSS !== "undefined" && CSS.escape
+            ? `.settings-key[data-profile-name="${CSS.escape(origName)}"]`
+            : "";
+        const target = focusSel
+            ? list.querySelector<HTMLElement>(focusSel)
+            : Array.from(list.querySelectorAll<HTMLElement>(".settings-key"))
+                .find((li) => li.dataset.profileName === origName);
+        target?.focus();
     }
 
     function renderList(): void {
@@ -190,18 +270,73 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
             li.setAttribute("role", "option");
             li.tabIndex = 0;
             li.dataset.profileName = p.name;
+            li.draggable = true;
             li.textContent = `${p.name || p.host}  (${p.user}@${p.host})`;
             li.addEventListener("click", () => void selectProfile(p));
+            li.addEventListener("dragstart", (ev) => {
+                ev.dataTransfer?.setData("text/plain", p.name);
+                ev.dataTransfer?.setDragImage(li, 10, 10);
+            });
+            li.addEventListener("dragover", (ev) => {
+                ev.preventDefault();
+                li.classList.add("conn-drop-target");
+            });
+            li.addEventListener("dragleave", () => li.classList.remove("conn-drop-target"));
+            li.addEventListener("drop", (ev) => {
+                ev.preventDefault();
+                li.classList.remove("conn-drop-target");
+                const draggedName = ev.dataTransfer?.getData("text/plain") ?? "";
+                if (!draggedName || draggedName === p.name) return;
+                void applyOrder(moveName(profiles.map((x) => x.name), draggedName, p.name));
+            });
             li.addEventListener("keydown", (ev) => {
                 if (ev.key === "Enter" || ev.key === " ") {
                     ev.preventDefault();
                     void selectProfile(p);
+                } else if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+                    // Walk from the FOCUSED row (not origName) so auto-save's
+                    // reload can't misplace the moving selection.
+                    ev.preventDefault();
+                    const currentName = (ev.currentTarget as HTMLElement).dataset.profileName ?? "";
+                    const idx = profiles.findIndex((x) => x.name === currentName);
+                    if (idx < 0) return;
+                    const step = ev.key === "ArrowDown" ? 1 : -1;
+                    const next = profiles[(idx + step + profiles.length) % profiles.length];
+                    if (next) void selectProfile(next);
                 }
             });
             list.appendChild(li);
         }
         markSelected(origName);
     }
+
+    /** Move `name` to sit directly before `beforeName` in the sequence. */
+    function moveName(names: string[], name: string, beforeName: string): string[] {
+        const out = names.filter((n) => n !== name);
+        const at = out.indexOf(beforeName);
+        out.splice(at < 0 ? out.length : at, 0, name);
+        return out;
+    }
+
+    let sortAsc = true;
+    async function applyOrder(names: string[]): Promise<void> {
+        if (!opts.onReorder) return;
+        try {
+            await opts.onReorder(names);
+            await reload(origName);
+            opts.onChanged?.();
+        } catch (err) {
+            opts.onError?.(String((err as Error)?.message ?? err));
+        }
+    }
+
+    btnSort.addEventListener("click", () => {
+        const names = profiles.map((p) => p.name).sort((a, b) =>
+            sortAsc ? a.localeCompare(b) : b.localeCompare(a));
+        sortAsc = !sortAsc;
+        btnSort.textContent = sortAsc ? "A-Z" : "Z-A";
+        void applyOrder(names);
+    });
 
     async function reload(selectName = ""): Promise<void> {
         try {
@@ -241,6 +376,11 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
         fill(profiles.find((p) => p.name === origName) ?? null);
     });
 
+    btnConnectTab.addEventListener("click", () => {
+        const src = profiles.find((p) => p.name === origName);
+        if (src && opts.onConnect) opts.onConnect(src);
+    });
+
     btnNew.addEventListener("click", () => {
         void selectProfile(null);
         inName.focus();
@@ -265,10 +405,7 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
             .catch((err) => opts.onError?.(String((err as Error)?.message ?? err)));
     });
 
-    // New/Duplicate buttons live at the bottom of the list column.
-    listFooterEl.className = "conn-list-footer";
-    listFooterEl.appendChild(btnNew);
-    listFooterEl.appendChild(btnDuplicate);
+    // (list footer buttons appended at construction time above)
 
     fill(null);
     void reload();

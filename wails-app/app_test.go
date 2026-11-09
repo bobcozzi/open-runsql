@@ -1,82 +1,43 @@
 package main
 
-import (
-	"testing"
-)
+import "testing"
 
-func names(profiles []ConnectionProfile) []string {
-	out := make([]string, len(profiles))
-	for i, p := range profiles {
-		out[i] = p.Name
+func TestMergeProfile(t *testing.T) {
+	existing := []ConnectionProfile{
+		{Name: "COZZI P1", Host: "p1.local", User: "cozzi", SortOrder: 2, PinnedAt: 5, PasswordB64: "cHc="},
+		{Name: "other", Host: "x.local", User: "x"},
 	}
-	return out
-}
 
-func TestSortProfilesSmallListKeepsCreationOrder(t *testing.T) {
-	// <=5 profiles: FILO — file (creation) order is preserved regardless of LastUsedAt.
-	profiles := []ConnectionProfile{
-		{Name: "zeta", LastUsedAt: 300},
-		{Name: "alpha", LastUsedAt: 100},
-		{Name: "mid", LastUsedAt: 200},
-	}
-	sortProfiles(profiles)
-	got := names(profiles)
-	want := []string{"zeta", "alpha", "mid"}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("position %d: got %q, want %q (order %v)", i, got[i], want[i], got)
+	t.Run("auto-save (name=host) preserves the custom name and ordering", func(t *testing.T) {
+		auto := ConnectionProfile{Name: "p1.local", Host: "p1.local", User: "cozzi", SavePassword: true}
+		out, replaced := mergeProfile([]ConnectionProfile{existing[0], existing[1]}, auto)
+		if !replaced || len(out) != 2 {
+			t.Fatalf("replaced=%v len=%d", replaced, len(out))
 		}
-	}
-}
-
-func TestSortProfilesSmallListPinnedFirst(t *testing.T) {
-	profiles := []ConnectionProfile{
-		{Name: "first", LastUsedAt: 300},
-		{Name: "second", LastUsedAt: 100, PinnedAt: 10},
-		{Name: "third", LastUsedAt: 200},
-	}
-	sortProfiles(profiles)
-	got := names(profiles)
-	if got[0] != "second" {
-		t.Fatalf("pinned profile should lead, got %v", got)
-	}
-	if got[1] != "first" || got[2] != "third" {
-		t.Fatalf("remainder should keep creation order, got %v", got)
-	}
-}
-
-func TestSortProfilesLargeListMRUAfterPinned(t *testing.T) {
-	profiles := make([]ConnectionProfile, 0, 7)
-	for i, n := range []string{"a", "b", "c", "d", "e", "f", "g"} {
-		profiles = append(profiles, ConnectionProfile{Name: n, LastUsedAt: int64(i)})
-	}
-	profiles[2].PinnedAt = 5 // "c" pinned
-	sortProfiles(profiles)
-	got := names(profiles)
-	if got[0] != "c" {
-		t.Fatalf("pinned profile should lead, got %v", got)
-	}
-	// Rest MRU: LastUsedAt desc => g,f,e,d,b,a
-	want := []string{"c", "g", "f", "e", "d", "b", "a"}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("position %d: got %q, want %q (order %v)", i, got[i], want[i], got)
+		if out[0].Name != "COZZI P1" {
+			t.Fatalf("name clobbered: %q", out[0].Name)
 		}
-	}
-}
-
-func TestSortProfilesMultiplePinnedMostRecentFirst(t *testing.T) {
-	profiles := []ConnectionProfile{
-		{Name: "a", PinnedAt: 10},
-		{Name: "b", PinnedAt: 20},
-		{Name: "c"},
-	}
-	sortProfiles(profiles)
-	got := names(profiles)
-	want := []string{"b", "a", "c"}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("position %d: got %q, want %q (order %v)", i, got[i], want[i], got)
+		if out[0].SortOrder != 2 || out[0].PinnedAt != 5 {
+			t.Fatalf("ordering lost: %+v", out[0])
 		}
-	}
+		if out[0].PasswordB64 != "cHc=" {
+			t.Fatalf("password lost: %q", out[0].PasswordB64)
+		}
+	})
+
+	t.Run("explicit rename updates the name", func(t *testing.T) {
+		rename := ConnectionProfile{Name: "Renamed", Host: "p1.local", User: "cozzi"}
+		out, _ := mergeProfile([]ConnectionProfile{existing[0]}, rename)
+		if out[0].Name != "Renamed" {
+			t.Fatalf("rename ignored: %q", out[0].Name)
+		}
+	})
+
+	t.Run("no match appends", func(t *testing.T) {
+		newP := ConnectionProfile{Name: "new", Host: "new.local", User: "n"}
+		out, replaced := mergeProfile([]ConnectionProfile{existing[0]}, newP)
+		if replaced || len(out) != 2 || out[1].Name != "new" {
+			t.Fatalf("append wrong: replaced=%v out=%+v", replaced, out)
+		}
+	})
 }

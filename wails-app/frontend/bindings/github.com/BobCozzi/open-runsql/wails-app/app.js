@@ -17,6 +17,19 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
+ * AddStatementHistory appends one entry (newest first, consecutive dup
+ * collapse, capped). Returns the connection's resulting list.
+ * @param {string} connectionID
+ * @param {string} text
+ * @returns {$CancellablePromise<$models.HistoryEntry[]>}
+ */
+export function AddStatementHistory(connectionID, text) {
+    return $Call.ByID(178537387, connectionID, text).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType1($result);
+    }));
+}
+
+/**
  * AttachConnection closes the torn-off window for a connection, if any, and
  * asks the main window to re-absorb it as a tab (ignored by detached windows).
  * @param {string} connectionID
@@ -42,7 +55,7 @@ export function CancelSQL(connectionID) {
  */
 export function Connect(req) {
     return $Call.ByID(164877153, req).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType1($result);
+        return $$createType3($result);
     }));
 }
 
@@ -62,6 +75,19 @@ export function DefaultSpoolDownloadDir() {
  */
 export function DeleteConnectionProfile(name) {
     return $Call.ByID(2675016907, name);
+}
+
+/**
+ * DeleteStatementHistory removes one entry by index (into the newest-first
+ * list). Out-of-range indexes are ignored.
+ * @param {string} connectionID
+ * @param {number} index
+ * @returns {$CancellablePromise<$models.HistoryEntry[]>}
+ */
+export function DeleteStatementHistory(connectionID, index) {
+    return $Call.ByID(2765932181, connectionID, index).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType1($result);
+    }));
 }
 
 /**
@@ -92,7 +118,7 @@ export function Disconnect(connectionID) {
  */
 export function Fetch(req) {
     return $Call.ByID(4196614347, req).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType3($result);
+        return $$createType5($result);
     }));
 }
 
@@ -102,7 +128,7 @@ export function Fetch(req) {
  */
 export function GetAppSettings() {
     return $Call.ByID(3099604383).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType4($result);
+        return $$createType6($result);
     }));
 }
 
@@ -113,8 +139,29 @@ export function GetAppSettings() {
  */
 export function GetCmdXml(req) {
     return $Call.ByID(1672636494, req).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType6($result);
+        return $$createType8($result);
     }));
+}
+
+/**
+ * GetConnectionIdentity returns the live host/user for a connection.
+ * @param {string} connectionID
+ * @returns {$CancellablePromise<$models.ConnectionIdentity>}
+ */
+export function GetConnectionIdentity(connectionID) {
+    return $Call.ByID(1340044249, connectionID).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType9($result);
+    }));
+}
+
+/**
+ * GetProfilePassword returns the stored password for a profile (OS vault
+ * first, legacy base64 second). Used by the Quick Connect form to prefill.
+ * @param {string} name
+ * @returns {$CancellablePromise<string>}
+ */
+export function GetProfilePassword(name) {
+    return $Call.ByID(3628926697, name);
 }
 
 /**
@@ -125,7 +172,7 @@ export function GetCmdXml(req) {
  */
 export function GetSpooledFileData(req) {
     return $Call.ByID(817362709, req).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType8($result);
+        return $$createType11($result);
     }));
 }
 
@@ -136,17 +183,19 @@ export function GetSpooledFileData(req) {
  */
 export function GetWorkspace(connectionID) {
     return $Call.ByID(597689140, connectionID).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType9($result);
+        return $$createType12($result);
     }));
 }
 
 /**
- * ListConnectionProfiles returns all saved connection profiles.
+ * ListConnectionProfiles returns all saved connection profiles. Legacy
+ * base64 passwords are migrated into the OS credential vault on first read
+ * and scrubbed from the file when migration succeeds.
  * @returns {$CancellablePromise<$models.ConnectionProfile[]>}
  */
 export function ListConnectionProfiles() {
     return $Call.ByID(1735721671).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType11($result);
+        return $$createType14($result);
     }));
 }
 
@@ -156,7 +205,7 @@ export function ListConnectionProfiles() {
  */
 export function ListDetached() {
     return $Call.ByID(521395759).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType12($result);
+        return $$createType15($result);
     }));
 }
 
@@ -168,7 +217,7 @@ export function ListDetached() {
  */
 export function ListOutputQueues(req) {
     return $Call.ByID(839594708, req).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType14($result);
+        return $$createType17($result);
     }));
 }
 
@@ -180,7 +229,18 @@ export function ListOutputQueues(req) {
  */
 export function ListSpooledFiles(req) {
     return $Call.ByID(2924065984, req).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType16($result);
+        return $$createType19($result);
+    }));
+}
+
+/**
+ * ListStatementHistory returns the entries for a connection, newest first.
+ * @param {string} connectionID
+ * @returns {$CancellablePromise<$models.HistoryEntry[]>}
+ */
+export function ListStatementHistory(connectionID) {
+    return $Call.ByID(3041235018, connectionID).then(/** @type {($result: any) => any} */(($result) => {
+        return $$createType1($result);
     }));
 }
 
@@ -190,7 +250,7 @@ export function ListSpooledFiles(req) {
  */
 export function ListWorkspaces() {
     return $Call.ByID(1856021707).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType17($result);
+        return $$createType20($result);
     }));
 }
 
@@ -210,8 +270,19 @@ export function MoveConnectionProfileToTop(name) {
  */
 export function MoveSpooledFile(req) {
     return $Call.ByID(2723128684, req).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType19($result);
+        return $$createType22($result);
     }));
+}
+
+/**
+ * OpenFileAs prompts with the OS-native Open dialog and returns the file's
+ * contents as text (for loading a .sql script into the editor). "" = canceled.
+ * @param {string} filterLabel
+ * @param {string} filterPattern
+ * @returns {$CancellablePromise<string>}
+ */
+export function OpenFileAs(filterLabel, filterPattern) {
+    return $Call.ByID(2135720515, filterLabel, filterPattern);
 }
 
 /**
@@ -255,6 +326,18 @@ export function PrintSpooledFile(filename, base64Data) {
 }
 
 /**
+ * ReorderConnectionProfiles applies an explicit list order: names are the
+ * connection names in the desired sequence; each gets SortOrder 1..N. Profiles
+ * not named keep their relative order after the named ones. Clears PinnedAt
+ * (explicit order replaces pinning).
+ * @param {string[]} names
+ * @returns {$CancellablePromise<void>}
+ */
+export function ReorderConnectionProfiles(names) {
+    return $Call.ByID(2792054394, names);
+}
+
+/**
  * Run executes the command-entry text: SQL via JDBC, or CL via CommandCall.
  * @param {$models.RunRequest} req
  * @returns {$CancellablePromise<any>}
@@ -271,6 +354,20 @@ export function Run(req) {
  */
 export function SaveConnectionProfile(p) {
     return $Call.ByID(3622685069, p);
+}
+
+/**
+ * SaveFileAs prompts with the OS-native Save dialog (default name/folder, file
+ * filter for the chosen format) and writes base64 content to the chosen path.
+ * Returns "" when the user cancels.
+ * @param {string} filename
+ * @param {string} base64Data
+ * @param {string} filterLabel
+ * @param {string} filterPattern
+ * @returns {$CancellablePromise<string>}
+ */
+export function SaveFileAs(filename, base64Data, filterLabel, filterPattern) {
+    return $Call.ByID(2627549058, filename, base64Data, filterLabel, filterPattern);
 }
 
 /**
@@ -303,7 +400,7 @@ export function SetAppSetting(key, value) {
  */
 export function SpooledFileAction(req) {
     return $Call.ByID(187847301, req).then(/** @type {($result: any) => any} */(($result) => {
-        return $$createType19($result);
+        return $$createType22($result);
     }));
 }
 
@@ -358,23 +455,26 @@ export function Version() {
 }
 
 // Private type creation functions
-const $$createType0 = $models.ConnectResponse.createFrom;
-const $$createType1 = $Create.Nullable($$createType0);
-const $$createType2 = $models.SqlResult.createFrom;
+const $$createType0 = $models.HistoryEntry.createFrom;
+const $$createType1 = $Create.Array($$createType0);
+const $$createType2 = $models.ConnectResponse.createFrom;
 const $$createType3 = $Create.Nullable($$createType2);
-const $$createType4 = $models.AppSettings.createFrom;
-const $$createType5 = $models.CmdXmlResult.createFrom;
-const $$createType6 = $Create.Nullable($$createType5);
-const $$createType7 = $models.SpooledFileDataResult.createFrom;
+const $$createType4 = $models.SqlResult.createFrom;
+const $$createType5 = $Create.Nullable($$createType4);
+const $$createType6 = $models.AppSettings.createFrom;
+const $$createType7 = $models.CmdXmlResult.createFrom;
 const $$createType8 = $Create.Nullable($$createType7);
-const $$createType9 = $models.WorkspaceState.createFrom;
-const $$createType10 = $models.ConnectionProfile.createFrom;
-const $$createType11 = $Create.Array($$createType10);
-const $$createType12 = $Create.Array($Create.Any);
-const $$createType13 = $models.OutputQueueListResult.createFrom;
-const $$createType14 = $Create.Nullable($$createType13);
-const $$createType15 = $models.SpooledFileResult.createFrom;
-const $$createType16 = $Create.Nullable($$createType15);
-const $$createType17 = $Create.Array($$createType9);
-const $$createType18 = $models.SpooledFileActionResult.createFrom;
+const $$createType9 = $models.ConnectionIdentity.createFrom;
+const $$createType10 = $models.SpooledFileDataResult.createFrom;
+const $$createType11 = $Create.Nullable($$createType10);
+const $$createType12 = $models.WorkspaceState.createFrom;
+const $$createType13 = $models.ConnectionProfile.createFrom;
+const $$createType14 = $Create.Array($$createType13);
+const $$createType15 = $Create.Array($Create.Any);
+const $$createType16 = $models.OutputQueueListResult.createFrom;
+const $$createType17 = $Create.Nullable($$createType16);
+const $$createType18 = $models.SpooledFileResult.createFrom;
 const $$createType19 = $Create.Nullable($$createType18);
+const $$createType20 = $Create.Array($$createType12);
+const $$createType21 = $models.SpooledFileActionResult.createFrom;
+const $$createType22 = $Create.Nullable($$createType21);

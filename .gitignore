@@ -9,3 +9,7 @@ go-stub/bridge-test
 ts-client/node_modules/
 *.v2.bak
 .DS_Store
+wails-app/ibmi-runsql-mac
+wails-app/ibmi-runsql-macIntel
+wails-app/ibmi-runsql-linux
+wails-app/ibmi-runsql-dev-backup

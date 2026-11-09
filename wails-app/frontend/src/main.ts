@@ -26,7 +26,9 @@ import { showPrompter } from "./clprompter/prompterView";
 import { buildSpooledFileRequest, createSpoolPane, type SpoolFilters } from "./spool";
 import { createSettingsPane, type SettingDef } from "./settings";
 import { createConnectionsPane } from "./connections";
-import { renderScsBytes } from "./scsRender";
+import { renderScsBytes, formatOsVersion } from "./scsRender";
+import { formatResultData, type SaveFormat } from "./resultExport";
+import { showHistoryPicker } from "./stmtHistory";
 import type { SpooledFileInfo } from "./types";
 import { t } from "./l10n";
 
@@ -60,6 +62,9 @@ const els = {
     statusText: el<HTMLSpanElement>("status-text"),
     btnLoadMore: el<HTMLButtonElement>("btn-load-more"),
     btnLoadAll: el<HTMLButtonElement>("btn-load-all"),
+    saveResultsWrap: el<HTMLSpanElement>("save-results-wrap"),
+    btnSaveResults: el<HTMLButtonElement>("btn-save-results"),
+    selSaveFormat: el<HTMLSelectElement>("sel-save-format"),
 };
 
 // --- Color mode (light/dark/system) ---
@@ -117,7 +122,7 @@ function applyL10nToStaticDom(): void {
     setTitle("btn-new-conn", t("html.newConnTitle", "New connection tab"));
     setPlaceholder("in-host", t("html.hostPlaceholder", "my.ibmi.host"));
     setPlaceholder("in-schema", t("html.schemaPlaceholder", "(optional)"));
-    setTitle("btn-saved-hosts", t("main.savedConnections", "Saved connections"));
+    setTitle("btn-saved-hosts", t("main.savedConnections", "Quick Connect: saved connections"));
     setTitle("btn-run", t("html.runTitle", "Run Selected (statement at cursor; Cmd/Ctrl+Enter)"));
     setTitle("btn-run-all", t("html.runAllTitle", "Run All (every statement, first to last)"));
     setTitle("btn-run-from", t("html.runFromTitle", "Run from Selected (cursor statement through the last)"));
@@ -128,6 +133,8 @@ function applyL10nToStaticDom(): void {
     setTitle("splitter", t("html.splitterTitle", "Drag to resize"));
     setText("btn-load-more", t("html.loadMore", "Load more"));
     setText("btn-load-all", t("html.loadAll", "Load all"));
+    setText("btn-save-results", t("main.saveResults", "Save as..."));
+    setText("btn-open-results-dir", t("main.openResultsDir", "Open Folder"));
     setText("work-tab-spool", t("spool.tab", "Spooled Files"));
     setText("work-tab-connections", t("conn.tab", "Connections"));
     setText("work-tab-settings", t("settings.tab", "Settings"));
@@ -168,8 +175,12 @@ function showPane(name: string): void {
         closePrompterPanesBelow(prompterDepth(name));
     }
     activePane = name;
+    const disconnected = !activeTab()?.connectionId;
+    // Connections/Settings are connection-independent: they open even when
+    // disconnected. Everything else waits for a connection.
+    const alwaysAvailable = name === "connections" || name === "settings";
     for (const pane of Array.from(els.workArea.querySelectorAll<HTMLElement>(".work-pane"))) {
-        pane.hidden = pane.dataset.pane !== name;
+        pane.hidden = (disconnected && !alwaysAvailable) ? true : pane.dataset.pane !== name;
     }
     for (const tab of Array.from(els.workTabs.querySelectorAll<HTMLElement>(".work-tab"))) {
         tab.classList.toggle("active", tab.dataset.pane === name);
@@ -312,8 +323,11 @@ const SETTING_DEFS: SettingDef[] = [
             load: () => app.ListConnectionProfiles(),
             save: (origName, p) => app.UpdateConnectionProfile(origName, p),
             remove: (name) => app.DeleteConnectionProfile(name),
+            getPassword: (name) => app.GetProfilePassword(name),
             onChanged: () => void loadProfiles(),
             onError: (msg) => showMessages([], msg),
+            onConnect: (p) => void connectToProfile(p),
+            onReorder: (names) => app.ReorderConnectionProfiles(names),
         });
         connHost.appendChild(pane.root);
     }
@@ -333,6 +347,7 @@ async function spoolDblClick(f: SpooledFileInfo): Promise<void> {
 
 /** Settings-backed toggles applied across the UI. */
 let confirmSpoolDelete = true;
+let preloadSpoolList = true;
 let appSettingsCache: AppSettings = {};
 function spoolMaxRowsSetting(): number {
     return appSettingsCache.spoolMaxRows ?? 0;
@@ -1028,6 +1043,11 @@ interface ResultSnapshot {
     messagesHtml: string;
     messagesVisible: boolean;
     showingResults: boolean;
+    // Quick Connect form state (per-tab).
+    connForm?: {
+        host: string; user: string; password: string; schema: string;
+        naming: string; tls: boolean; savePassword: boolean;
+    };
 }
 
 interface ConnectionTab {
@@ -1137,6 +1157,15 @@ function snapshotActiveTab(): void {
         messagesHtml: els.messageList.innerHTML,
         messagesVisible: els.messageList.children.length > 0,
         showingResults: els.resultBody.children.length > 0 || els.resultHead.children.length > 0,
+        connForm: {
+            host: el<HTMLInputElement>("in-host").value,
+            user: el<HTMLInputElement>("in-user").value,
+            password: el<HTMLInputElement>("in-password").value,
+            schema: el<HTMLInputElement>("in-schema").value,
+            naming: el<HTMLSelectElement>("in-naming").value,
+            tls: el<HTMLInputElement>("in-tls").checked,
+            savePassword: el<HTMLInputElement>("in-save-password").checked,
+        },
     };
 }
 
@@ -1165,6 +1194,16 @@ function restoreActiveTab(): void {
     }
     els.messageList.innerHTML = snap?.messagesHtml ?? "";
     closeAllPrompterPanes();
+    // Quick Connect form: per-tab state; a fresh tab starts blank so the
+    // suggest dropdown isn't pre-filtered by the previous tab's host.
+    const cf = snap?.connForm;
+    el<HTMLInputElement>("in-host").value = cf?.host ?? "";
+    el<HTMLInputElement>("in-user").value = cf?.user ?? "";
+    el<HTMLInputElement>("in-password").value = cf?.password ?? "";
+    el<HTMLInputElement>("in-schema").value = cf?.schema ?? "";
+    el<HTMLSelectElement>("in-naming").value = cf?.naming ?? "sql";
+    el<HTMLInputElement>("in-tls").checked = cf?.tls ?? false;
+    el<HTMLInputElement>("in-save-password").checked = cf?.savePassword ?? false;
     pushWorkspaceState();
 }
 
@@ -1202,8 +1241,9 @@ function addTab(): ConnectionTab {
     tabs.push(tab);
     activeTabKey = tab.key;
     restoreActiveTab();
-    // Settings "default naming mode" preselects the connect form's Naming.
-    if (appSettingsCache.defaultNaming) {
+    // Settings "default naming mode" preselects the connect form's Naming
+    // (restoreActiveTab resets it to the per-tab default first).
+    if (appSettingsCache.defaultNaming && !tab.snapshot?.connForm) {
         el<HTMLSelectElement>("in-naming").value = appSettingsCache.defaultNaming;
     }
     renderTabs();
@@ -1261,6 +1301,7 @@ if (!detachedConnId) {
 
 function switchTab(key: string): void {
     if (activeTabKey === key) return;
+    void persistEditorScript();
     snapshotActiveTab();
     activeTabKey = key;
     restoreActiveTab();
@@ -1274,6 +1315,7 @@ async function closeTab(key: string): Promise<void> {
     const tab = tabs[idx];
     const app = App();
     if (app && tab.connectionId) {
+        if (tab.key === activeTabKey) await persistEditorScript();
         try {
             await app.Disconnect(tab.connectionId);
         } catch {
@@ -1295,7 +1337,9 @@ async function closeTab(key: string): Promise<void> {
 function syncConnectionUi(): void {
     const tab = activeTab();
     const connected = !!tab?.connectionId;
-    els.badge.textContent = connected ? tab!.label : t("main.notConnected", "Not connected");
+    els.badge.textContent = connected
+        ? `${tab!.label} - ${t("main.connected", "Connected")}`
+        : t("main.notConnected", "Not connected");
     els.badge.className = `badge ${connected ? "connected" : "disconnected"}`;
     els.btnConnect.disabled = connected;
     els.btnDisconnect.disabled = !connected;
@@ -1305,11 +1349,17 @@ function syncConnectionUi(): void {
     els.btnPrompt.disabled = !connected;
     els.btnCancel.disabled = true;
     els.connectPanel.hidden = connected;
-    // The tab bar (Messages/Results/Spooled Files/Connections/Settings) is
-    // always visible — Settings/Connections must be reachable pre-connect.
-    els.workArea.hidden = false;
-    el<HTMLDivElement>("splitter").hidden = false;
+    // The bottom tab bar is ALWAYS visible/clickable. Connections/Settings
+    // open even disconnected; Results/Messages/Spooled Files hide until
+    // connected. The SQL editor hides when disconnected.
+    const panes = els.workArea.querySelectorAll<HTMLElement>(".work-pane");
+    panes.forEach((p) => {
+        const alwaysAvailable = p.dataset.pane === "connections" || p.dataset.pane === "settings";
+        p.hidden = connected ? p.dataset.pane !== activePane : !(alwaysAvailable && p.dataset.pane === activePane);
+    });
+    el<HTMLDivElement>("splitter").hidden = !connected;
     el<HTMLSpanElement>("run-controls").hidden = !connected;
+    document.querySelector<HTMLElement>(".editor-wrap")!.hidden = !connected;
 }
 
 // Display settings — future per-connection/global config; heading default is ON
@@ -1331,7 +1381,7 @@ function setConnected(info: ConnectResponse): void {
     state.more = false;
     renderTabs();
     syncConnectionUi();
-    els.badge.textContent = `${info.user}@${info.host} — ${info.databaseProduct} ${info.databaseVersion}`;
+    els.badge.textContent = `${info.user}@${info.host} — ${info.databaseProduct} ${formatOsVersion(info.databaseVersion)} - ${t("main.connected", "Connected")}`;
     els.connectError.hidden = true;
     els.sqlInput.focus();
     // ACS-style connection log line.
@@ -1362,6 +1412,9 @@ function setDisconnected(): void {
     els.statusText.textContent = "";
     els.btnLoadMore.hidden = true;
     els.btnLoadAll.hidden = true;
+    // Back to Results: leaving Connections/Settings visible would stack that
+    // pane under the reappearing Quick Connect panel.
+    showPane("results");
     renderTabs();
     syncConnectionUi();
     closeAllPrompterPanes();
@@ -1573,7 +1626,38 @@ function updateStatus(kind: string, result: SqlResult | undefined, totalRows: nu
     }
     els.btnLoadMore.hidden = !state.more;
     els.btnLoadAll.hidden = !state.more;
+    // Save-as: only meaningful with rows on screen.
+    els.saveResultsWrap.hidden = !(kind === "rows" && totalRows > 0);
 }
+
+// Save the result grid: native Save dialog (name + location), chosen format.
+els.btnSaveResults.addEventListener("click", () => {
+    void (async () => {
+        const app = App();
+        if (!app || state.columns.length === 0 || state.rows.length === 0) return;
+        const format = els.selSaveFormat.value as SaveFormat;
+        const text = formatResultData(state.columns, state.rows, format);
+        const host = activeTab()?.label?.split("@")[1] || "results";
+        const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+        const filterLabel = format.toUpperCase();
+        try {
+            const saved = await app.SaveFileAs(
+                `results_${host}_${stamp}.${format}`,
+                btoa(unescape(encodeURIComponent(text))),
+                filterLabel, `*.${format}`);
+            if (!saved) return; // canceled
+            appendLogLine(t("spool.logSaved", "Saved to {path}").replace("{path}", saved), "msg-info", true);
+            els.statusText.textContent = t("spool.statusSaved", "Saved {path}").replace("{path}", saved);
+        } catch (err) {
+            showMessages([], String((err as Error)?.message ?? err));
+        }
+    })();
+});
+
+// "Open" beside Save-as: reveal the download folder in the OS file manager.
+document.getElementById("btn-open-results-dir")?.addEventListener("click", () => {
+    App()?.OpenSpoolDownloadDir().catch((err) => showMessages([], String((err as Error)?.message ?? err)));
+});
 
 function showSqlResult(result: SqlResult): void {
     if (result.kind === "error") {
@@ -1631,6 +1715,12 @@ async function doConnect(): Promise<void> {
     if (!app) return;
     els.connectError.hidden = true;
     els.btnConnect.disabled = true;
+    // Connecting status on the profile-hint line under GO (dominant styling).
+    const hint = el<HTMLSpanElement>("profile-hint");
+    const hintText = hint.textContent ?? "";
+    const connectingTo = `${el<HTMLInputElement>("in-user").value.trim()}@${el<HTMLInputElement>("in-host").value.trim()}`;
+    hint.textContent = t("main.connecting", "Connecting to {target}...").replace("{target}", connectingTo);
+    hint.classList.add("connecting");
     try {
         const info = await app.Connect({
             host: el<HTMLInputElement>("in-host").value,
@@ -1644,10 +1734,21 @@ async function doConnect(): Promise<void> {
         setConnected(info);
         // Auto-save (MRU) on successful connect — no Save button needed.
         void saveProfile();
-        // Load spooled files for the new connection if the pane is visible.
+        // Script recall: this connection's saved editor text returns when the
+        // editor is blank and the profile's save-script toggle is on.
+        const prof = profiles.find((p) =>
+            p.host.toLowerCase() === info.host.toLowerCase()
+            && p.user.toLowerCase() === info.user.toLowerCase());
+        if (prof?.saveScript !== false && prof?.script && !els.sqlInput.value.trim()) {
+            els.sqlInput.value = prof.script;
+        }
+        // Spooled Files: preload at connect when the setting is on; otherwise
+        // leave the list empty so opening the tab (or Refresh) fetches it.
         spoolState.loadedFor = "";
         spool.clear();
-        void refreshSpool(spool.filters());
+        if (preloadSpoolList) {
+            void refreshSpool(spool.filters());
+        }
     } catch (err) {
         els.btnConnect.disabled = false;
         els.connectError.textContent = String((err as Error)?.message ?? err);
@@ -1656,6 +1757,9 @@ async function doConnect(): Promise<void> {
         appendLogLine(`[ ${nowStamp()} ]  ${t("main.connect", "Connect")}`, "msg-action");
         appendLogLine(t("main.connectionFailed", "Connection failed: {message}").replace("{message}", String((err as Error)?.message ?? err)), "msg-error", true);
         showPane("messages");
+    } finally {
+        hint.classList.remove("connecting");
+        hint.textContent = hintText;
     }
 }
 
@@ -1674,29 +1778,40 @@ function formProfile(): ConnectionProfile {
         defaultSchema: el<HTMLInputElement>("in-schema").value.trim(),
         naming: el<HTMLSelectElement>("in-naming").value,
         tls: el<HTMLInputElement>("in-tls").checked,
+        preloadSpool: preloadSpoolList,
         savePassword,
         passwordB64: savePassword && password ? btoa(password) : undefined,
     };
 }
 
-function fillFormFromProfile(p: ConnectionProfile): void {
+function fillFormFromProfile(p: ConnectionProfile, password?: string): void {
     el<HTMLInputElement>("in-host").value = p.host;
     el<HTMLInputElement>("in-user").value = p.user;
     el<HTMLInputElement>("in-schema").value = p.defaultSchema ?? "";
     el<HTMLSelectElement>("in-naming").value = p.naming || "sql";
     el<HTMLInputElement>("in-tls").checked = !!p.tls;
     el<HTMLInputElement>("in-save-password").checked = !!p.savePassword;
+    // Per-connection spool preload: this profile's value wins for this tab.
+    preloadSpoolList = p.preloadSpool !== false;
     const pwField = el<HTMLInputElement>("in-password");
-    if (p.savePassword && p.passwordB64) {
-        try {
-            pwField.value = atob(p.passwordB64);
-        } catch {
-            pwField.value = "";
-        }
+    if (p.savePassword && password) {
+        pwField.value = password;
         el<HTMLButtonElement>("btn-connect").focus();
     } else {
         pwField.value = "";
         pwField.focus();
+    }
+}
+
+/** Connections pane "Connect in new Tab": fill the form from the profile and
+ * connect. Reuses the current tab when it has no connection yet (initial
+ * unconnected tab), otherwise opens a fresh tab first. */
+async function connectToProfile(p: ConnectionProfile): Promise<void> {
+    if (activeTab()?.connectionId) addTab();
+    const pw = p.savePassword ? await App()?.GetProfilePassword(p.name).catch(() => "") : "";
+    fillFormFromProfile(p, pw ?? "");
+    if (p.savePassword && pw) {
+        void doConnect();
     }
 }
 
@@ -1737,6 +1852,7 @@ async function doDisconnect(): Promise<void> {
     const app = App();
     const tab = activeTab();
     if (!app || !tab?.connectionId) return;
+    await persistEditorScript();
     const connId = tab.connectionId;
     try {
         await app.Disconnect(connId);
@@ -1771,6 +1887,12 @@ async function runOne(text: string, actionLabel = t("main.logRunSelected", "Run 
     const app = App();
     if (!app || !activeTab()?.connectionId) return;
     inputHistories.for(activeTab()?.connectionId).push(text);
+    await persistEditorScript(); // keep the per-connection script current on every run
+    // Persisted per-connection history (powers the picker; survives restarts).
+    // Store the terminating semicolon so recall/picker round-trip the exact
+    // runnable statement.
+    const logged = /;\s*$/.test(text) ? text : `${text};`;
+    void app.AddStatementHistory(activeTab()!.connectionId!, logged).catch(() => { /* best effort */ });
     state.sortCol = -1;
     state.sortDir = 1;
     state.columns = [];
@@ -2067,6 +2189,114 @@ el<HTMLButtonElement>("btn-new-conn").addEventListener("click", () => addTab());
 els.btnLoadMore.addEventListener("click", () => void doFetch(false));
 els.btnLoadAll.addEventListener("click", () => void doFetch(true));
 
+// Statement-history picker: per-connection persisted log (history.json via
+// Go). F6 or the History button opens it; Enter/click inserts at the cursor,
+// × removes an entry, the filter box narrows the list.
+async function openHistoryPicker(): Promise<void> {
+    const app = App();
+    const connId = activeTab()?.connectionId;
+    if (!app || !connId) return;
+    let entries;
+    try {
+        entries = await app.ListStatementHistory(connId);
+    } catch (err) {
+        showMessages([], String((err as Error)?.message ?? err));
+        return;
+    }
+    showHistoryPicker({
+        entries,
+        onInsert: (text) => {
+            const ta = els.sqlInput;
+            const stmt = /;\s*$/.test(text) ? text : `${text};`;
+            const start = ta.selectionStart ?? ta.value.length;
+            const end = ta.selectionEnd ?? start;
+            ta.value = ta.value.slice(0, start) + stmt + ta.value.slice(end);
+            const caret = start + stmt.length;
+            ta.focus();
+            ta.setSelectionRange(caret, caret);
+            pushWorkspaceState();
+        },
+        onDelete: async (index) => {
+            try {
+                return await app.DeleteStatementHistory(connId, index);
+            } catch {
+                return entries;
+            }
+        },
+    });
+}
+
+document.getElementById("btn-history")?.addEventListener("click", () => void openHistoryPicker());
+
+// Persist the editor text onto the matching profile (session continuity).
+// Keyed on the LIVE connection's host/user (authoritative from Go), gated by
+// the profile's "save script" toggle (default on). Async; fire-and-forget at
+// blur/close, awaited at run/disconnect so it lands before the state change.
+async function persistEditorScript(): Promise<void> {
+    const tab = activeTab();
+    const app = App();
+    if (!app || !tab?.connectionId) return;
+    let host = "";
+    let user = "";
+    try {
+        const id = await app.GetConnectionIdentity(tab.connectionId);
+        host = (id.host ?? "").toLowerCase();
+        user = (id.user ?? "").toLowerCase();
+    } catch {
+        return;
+    }
+    if (!host || !user) return;
+    const prof = profiles.find((p) =>
+        p.host.toLowerCase() === host && p.user.toLowerCase() === user);
+    if (!prof || prof.saveScript === false) return;
+    if ((prof.script ?? "") === els.sqlInput.value) return;
+    try {
+        await app.UpdateConnectionProfile(prof.name, { ...prof, script: els.sqlInput.value });
+        prof.script = els.sqlInput.value;
+    } catch { /* best effort */ }
+}
+
+// Editor session continuity: save the script for the active connection when
+// the window closes (best effort — the page may be mid-teardown).
+window.addEventListener("beforeunload", () => persistEditorScript());
+
+// Also save on editor blur (debounced) so a crash/force-quit doesn't lose it.
+let scriptSaveTimer: ReturnType<typeof setTimeout> | undefined;
+els.sqlInput.addEventListener("blur", () => {
+    clearTimeout(scriptSaveTimer);
+    scriptSaveTimer = setTimeout(() => void persistEditorScript(), 400);
+});
+
+// File... button: save the editor as a .sql file, or open one back in.
+document.getElementById("btn-script-file")?.addEventListener("click", () => {
+    void (async () => {
+        const app = App();
+        if (!app) return;
+        if (els.sqlInput.value.trim()) {
+            // Save dialog.
+            try {
+                const saved = await app.SaveFileAs("ibmi-runsql.sql",
+                    btoa(unescape(encodeURIComponent(els.sqlInput.value))),
+                    "SQL Script", "*.sql");
+                if (!saved) return;
+                appendLogLine(t("spool.logSaved", "Saved to {path}").replace("{path}", saved), "msg-info", true);
+            } catch (err) {
+                showMessages([], String((err as Error)?.message ?? err));
+            }
+        } else {
+            // Open dialog into a blank editor.
+            try {
+                const text = await app.OpenFileAs("SQL Script", "*.sql");
+                if (!text) return;
+                els.sqlInput.value = text;
+                pushWorkspaceState();
+            } catch (err) {
+                showMessages([], String((err as Error)?.message ?? err));
+            }
+        }
+    })();
+});
+
 // Statement-history recall in the editor. F9 = previous (older), F8 = next
 // (newer) — same keys as the cozzi-cl-prompter Command Entry. ArrowUp/ArrowDown
 // recall only when the caret sits on the first/last line with no selection and
@@ -2074,8 +2304,8 @@ els.btnLoadAll.addEventListener("click", () => void doFetch(true));
 // document jumps) are untouched. Cursor lands at the end of the recalled text.
 function handleHistoryKeydown(ev: KeyboardEvent): void {
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-    const history = inputHistories.for(activeTab()?.connectionId);
-    if (!history.hasHistory) return;
+    const connId = activeTab()?.connectionId;
+    const history = inputHistories.for(connId);
     let direction: "prev" | "next" | undefined;
     if (ev.key === "F9") direction = "prev";
     else if (ev.key === "F8") direction = "next";
@@ -2088,6 +2318,20 @@ function handleHistoryKeydown(ev: KeyboardEvent): void {
         );
     }
     if (!direction) return;
+    // First recall after launch: seed from the persisted per-connection log.
+    if (!history.hasHistory && connId) {
+        ev.preventDefault();
+        void App()?.ListStatementHistory(connId).then((entries) => {
+            for (let i = entries.length - 1; i >= 0; i--) history.push(entries[i].text);
+            const recalled = direction === "prev" ? history.prev(els.sqlInput.value) : history.next();
+            if (recalled === undefined) return;
+            els.sqlInput.value = recalled;
+            els.sqlInput.setSelectionRange(recalled.length, recalled.length);
+            pushWorkspaceState();
+        }).catch(() => { /* no history */ });
+        return;
+    }
+    if (!history.hasHistory) return;
     const recalled = direction === "prev" ? history.prev(els.sqlInput.value) : history.next();
     if (recalled === undefined) return;
     ev.preventDefault();
@@ -2104,6 +2348,10 @@ els.sqlInput.addEventListener("keydown", (ev: KeyboardEvent) => {
     if (ev.key === "F4") {
         ev.preventDefault();
         void doPrompt();
+    }
+    if (ev.key === "F6") {
+        ev.preventDefault();
+        void openHistoryPicker();
     }
     // Home/End: text-editor semantics — column 1 / end of the caret's line.
     // (WKWebView textarea leaves these as no-ops on macOS.)
@@ -2210,19 +2458,20 @@ async function bumpProfile(name: string): Promise<void> {
     }
 }
 
-// Word-font-dropdown style: with more than 5 saved profiles, the 5 most
-// recently used appear on top above a separator; at 5 or fewer the list is
-// stable (Go sorts pinned-first then creation/FILO order) so connections stop
-// being moving targets.
-const RECENT_SECTION_SIZE = 5;
-
-function toggleSavedHosts(): void {
+// Quick Connect saved-connections dropdown: opens on the arrow button or when
+// the Host field gains focus; typing filters the list (name/host/user,
+// case-insensitive). No MRU section — the Connections pane owns ordering
+// (drag/A-Z), and filtering replaces recency.
+function renderSavedHosts(filter = ""): void {
     const popup = el<HTMLDivElement>("saved-hosts-popup");
-    if (!popup.hidden) {
-        popup.hidden = true;
-        return;
-    }
     popup.innerHTML = "";
+    const q = filter.trim().toLowerCase();
+    const matches = q
+        ? profiles.filter((p) =>
+            (p.name || "").toLowerCase().includes(q)
+            || p.host.toLowerCase().includes(q)
+            || p.user.toLowerCase().includes(q))
+        : profiles;
     const addItem = (p: ConnectionProfile) => {
         const item = document.createElement("button");
         item.type = "button";
@@ -2232,7 +2481,9 @@ function toggleSavedHosts(): void {
         item.textContent = `${p.name || p.host}  (${p.user}@${p.host})`;
         item.title = t("main.savedHostItemTitle", "Click to fill form; right-click for options");
         item.addEventListener("click", () => {
-            fillFormFromProfile(p);
+            void App()?.GetProfilePassword(p.name)
+                .catch(() => "")
+                .then((pw) => fillFormFromProfile(p, pw ?? ""));
             popup.hidden = true;
             // Enable the quick-connect GO button for the selected profile.
             const go = document.getElementById("btn-go") as HTMLButtonElement | null;
@@ -2240,27 +2491,56 @@ function toggleSavedHosts(): void {
         });
         popup.appendChild(item);
     };
-    if (profiles.length === 0) {
+    if (matches.length === 0) {
         const empty = document.createElement("div");
         empty.className = "combo-item combo-empty";
-        empty.textContent = t("main.noSavedConnections", "No saved connections yet — connect once and it will appear here.");
+        empty.textContent = q
+            ? t("main.noMatchingConnections", "No connections match.")
+            : t("main.noSavedConnections", "No saved connections yet — connect once and it will appear here.");
         popup.appendChild(empty);
     } else {
-        const pinnedCount = profiles.filter((p) => (p.pinnedAt ?? 0) > 0).length;
-        const recentCount = profiles.length > RECENT_SECTION_SIZE
-            ? Math.max(pinnedCount, RECENT_SECTION_SIZE)
-            : profiles.length;
-        profiles.forEach((p, i) => {
-            if (i === recentCount) {
-                const sep = document.createElement("div");
-                sep.className = "combo-separator";
-                popup.appendChild(sep);
-            }
-            addItem(p);
-        });
+        matches.forEach(addItem);
     }
     popup.hidden = false;
 }
+
+function toggleSavedHosts(): void {
+    const popup = el<HTMLDivElement>("saved-hosts-popup");
+    if (!popup.hidden) {
+        popup.hidden = true;
+        return;
+    }
+    renderSavedHosts(el<HTMLInputElement>("in-host").value);
+}
+
+const hostInput = el<HTMLInputElement>("in-host");
+const btnClearHost = el<HTMLButtonElement>("btn-clear-host");
+const updateClearHost = () => { btnClearHost.hidden = hostInput.value === ""; };
+// Catch programmatic .value writes (dropdown pick, profile fill, tab restore)
+// — 'input' only fires on user typing.
+{
+    const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!;
+    Object.defineProperty(hostInput, "value", {
+        get: desc.get,
+        set(v: string) { desc.set!.call(this, v); updateClearHost(); },
+        configurable: true,
+    });
+}
+hostInput.addEventListener("focus", () => {
+    if (profiles.length > 0) renderSavedHosts(hostInput.value);
+});
+hostInput.addEventListener("input", () => {
+    updateClearHost();
+    const popup = el<HTMLDivElement>("saved-hosts-popup");
+    if (!popup.hidden || profiles.length > 0) renderSavedHosts(hostInput.value);
+});
+btnClearHost.addEventListener("click", () => {
+    hostInput.value = "";
+    updateClearHost();
+    el<HTMLDivElement>("saved-hosts-popup").hidden = true;
+    hostInput.focus();
+});
+updateClearHost();
 
 // Delegate contextmenu from the popup container with capture — more reliable
 // in WKWebView than per-button listeners (buttons can swallow/retarget it).
@@ -2296,6 +2576,13 @@ void loadProfiles();
     const splitter = el<HTMLDivElement>("splitter");
     const editor = document.querySelector<HTMLElement>(".editor-wrap");
     if (!editor) return;
+    const HEIGHT_KEY = "ibmi-runsql-editor-height";
+    // Restore the persisted editor height (survives launch/disconnect).
+    const saved = Number(localStorage.getItem(HEIGHT_KEY) ?? "0");
+    if (saved > 0) {
+        editor.style.height = `${saved}px`;
+        editor.style.flex = "none";
+    }
     let dragging = false;
     let startY = 0;
     let startHeight = 0;
@@ -2313,6 +2600,7 @@ void loadProfiles();
         document.body.classList.remove("resizing-v");
         document.removeEventListener("mousemove", onMove);
         document.removeEventListener("mouseup", onUp);
+        localStorage.setItem(HEIGHT_KEY, String(Math.round(editor.getBoundingClientRect().height)));
     };
     splitter.addEventListener("mousedown", (ev) => {
         dragging = true;

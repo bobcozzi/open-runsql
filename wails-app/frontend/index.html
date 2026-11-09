@@ -34,14 +34,18 @@
         <button id="btn-new-conn" class="btn tab-add" title="New connection tab">+</button>
     </nav>
 
-    <div id="connect-panel" class="connect-panel">
+    <div id="connect-panel" class="connect-panel" aria-label="Quick Connect">
         <div class="connect-grid">
             <label>Host
                 <div class="host-combo">
-                    <input id="in-host" type="text" autocomplete="new-password" autocorrect="off" autocapitalize="off"
-                        spellcheck="false" placeholder="my.ibmi.host" />
+                    <span class="host-input-wrap">
+                        <input id="in-host" type="text" autocomplete="new-password" autocorrect="off"
+                            autocapitalize="off" spellcheck="false" placeholder="my.ibmi.host" />
+                        <button id="btn-clear-host" class="combo-clear" type="button" tabindex="-1" title="Clear"
+                            hidden>&times;</button>
+                    </span>
                     <button id="btn-saved-hosts" class="btn combo-arrow" type="button"
-                        title="Saved connections">&#9660;</button>
+                        title="Quick Connect: saved connections">&#9660;</button>
                     <div id="saved-hosts-popup" class="combo-popup" hidden></div>
                 </div>
             </label>
@@ -60,13 +64,14 @@
             <label class="tls-row"><input id="in-tls" type="checkbox" /> Secure (TLS)</label>
             <button id="btn-go" class="btn btn-go" type="button" disabled title="Connect now">GO</button>
             <label class="tls-row"
-                title="Store the password base64-obscured in the saved connection file (obscured, not encrypted)">
+                title="Store the password in the OS credential vault (Keychain / Credential Manager / Secret Service)">
                 <input id="in-save-password" type="checkbox" /> Save password
             </label>
         </div>
         <div class="profile-row">
-            <span class="profile-hint">Connections are remembered automatically; passwords only if "Save password" is
-                checked (obscured, not encrypted). Right-click a saved connection for options.</span>
+            <span id="profile-hint" class="profile-hint">Connections are remembered automatically; passwords are stored
+                in the
+                OS credential vault when "Save password" is checked. Right-click a saved connection for options.</span>
         </div>
         <div id="connect-error" class="error-text" hidden></div>
     </div>
@@ -97,6 +102,9 @@
                 </button>
                 <button id="btn-cancel" class="btn" disabled title="Cancel running statement">Cancel</button>
                 <button id="btn-prompt" class="btn" disabled title="Prompt CL command (F4)">Prompt</button>
+                <button id="btn-history" class="btn" type="button" title="Statement history (F6)">History</button>
+                <button id="btn-script-file" class="btn" type="button"
+                    title="Save or open the editor as a .sql file">File...</button>
             </span>
             <span class="hint">SQL &mdash; or prefix with <code>CL:</code> for IBM i commands (e.g.
                 <code>CL: WRKSYSSTS OUTPUT(*PRINT)</code>)</span>
@@ -119,6 +127,17 @@
             <!-- Prompter tabs are appended dynamically -->
             <span class="spacer"></span>
             <span id="status-text" class="status-inline"></span>
+            <span id="save-results-wrap" class="save-results" hidden>
+                <button id="btn-save-results" class="btn" type="button">Save as...</button>
+                <select id="sel-save-format" title="Format">
+                    <option value="csv" selected>CSV</option>
+                    <option value="tsv">TSV</option>
+                    <option value="json">JSON</option>
+                    <option value="md">Markdown</option>
+                </select>
+                <button id="btn-open-results-dir" class="btn" type="button" title="Open the download folder">Open
+                    Folder</button>
+            </span>
             <button id="btn-load-more" class="btn" hidden>Load more</button>
             <button id="btn-load-all" class="btn" hidden>Load all</button>
         </div>
@@ -142,6 +161,7 @@
 
         <section class="empty-state" id="empty-state">
             <p>Connect to an IBM i, then run SQL statements or CL commands.</p>
+            <p class="byline">Designed for IBM i by Bob Cozzi</p>
         </section>
     </section>
 

@@ -25,6 +25,20 @@ run:
 build:
 	go build -tags production -o $(APP) .
 
+# Distribution builds (stripped, shareable). Naming: common platforms get the
+# plain base name; rare ones get a suffix. macOS builds keep CGO on (webview
+# requires it); Windows/Linux cross-compile clean with CGO off.
+#   ibmi-runsql           macOS Apple Silicon (also the local dev name)
+#   ibmi-runsql-macIntel  macOS Intel (rare; build on demand)
+#   ibmi-runsql.exe       Windows amd64
+#   ibmi-runsql-linux     Linux amd64
+dist: frontend
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -tags production -ldflags "-s -w" -o ibmi-runsql.exe .
+	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -tags production -ldflags "-s -w" -o ibmi-runsql-linux .
+	GOOS=darwin GOARCH=arm64 go build -tags production -ldflags "-s -w" -o ibmi-runsql .
+	# Intel Mac (only when someone asks):
+	# GOOS=darwin GOARCH=amd64 go build -tags production -ldflags "-s -w" -o ibmi-runsql-macIntel .
+
 dev:
 	wails dev
 

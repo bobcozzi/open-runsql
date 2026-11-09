@@ -164,11 +164,18 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
         if (desc.textContent) editor.appendChild(desc);
     }
 
-    function select(key: string): void {
+    function select(key: string, focus = false): void {
         selectedKey = key;
-        for (const [k, li] of itemFor) li.classList.toggle("selected", k === key);
+        for (const [k, li] of itemFor) {
+            const on = k === key;
+            li.classList.toggle("selected", on);
+            // Roving tabindex: only the selected item is focusable, so focus
+            // styling can never linger on the previous selection.
+            li.tabIndex = on ? 0 : -1;
+        }
         const def = defs.find((d) => d.key === key);
         if (def) renderEditor(def);
+        if (focus) itemFor.get(key)?.focus();
     }
 
     for (const def of defs) {
@@ -177,19 +184,16 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
         li.setAttribute("role", "option");
         li.tabIndex = 0;
         li.textContent = t(`settings.${def.key}.label`, def.key);
-        li.addEventListener("click", () => select(def.key));
+        li.addEventListener("click", () => select(def.key, true));
         li.addEventListener("keydown", (ev) => {
             if (ev.key === "Enter" || ev.key === " ") {
                 ev.preventDefault();
-                select(def.key);
+                select(def.key, true);
             } else if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
                 ev.preventDefault();
                 const idx = defs.findIndex((d) => d.key === selectedKey);
                 const next = defs[idx + (ev.key === "ArrowDown" ? 1 : -1)];
-                if (next) {
-                    select(next.key);
-                    itemFor.get(next.key)?.focus();
-                }
+                if (next) select(next.key, true);
             }
         });
         itemFor.set(def.key, li);
