@@ -1881,14 +1881,22 @@ async function doConnect(): Promise<void> {
     hint.textContent = t("main.connecting", "Connecting to {target}...").replace("{target}", connectingTo);
     hint.classList.add("connecting");
     try {
+        // Bidi string type lives on the saved profile (Connections pane), not
+        // the quick-connect form — resolve it from the host/user match.
+        const hostVal = el<HTMLInputElement>("in-host").value;
+        const userVal = el<HTMLInputElement>("in-user").value;
+        const matchProf = profiles.find((p) =>
+            p.host.toLowerCase() === hostVal.trim().toLowerCase()
+            && p.user.toLowerCase() === userVal.trim().toLowerCase());
         const info = await app.Connect({
-            host: el<HTMLInputElement>("in-host").value,
-            user: el<HTMLInputElement>("in-user").value,
+            host: hostVal,
+            user: userVal,
             password: el<HTMLInputElement>("in-password").value,
             tls: el<HTMLInputElement>("in-tls").checked,
             naming: el<HTMLSelectElement>("in-naming").value,
             defaultSchema: el<HTMLInputElement>("in-schema").value,
             fetchSize: state.fetchSize,
+            bidiStringType: matchProf?.bidiStringType ?? "",
         });
         setConnected(info);
         // Auto-save (MRU) on successful connect — no Save button needed.

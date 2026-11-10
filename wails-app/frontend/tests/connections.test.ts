@@ -27,7 +27,7 @@ function mkPane(profiles: ConnectionProfile[] = [P1, P2], over: Partial<Paramete
     return { pane, opts };
 }
 
-// Field order: Name, Host, User, Password, Schema, Naming, TLS, SavePw
+// Field order: Name, Host, User, Password, Schema, Naming, Bidi, TLS, SavePw, ...
 const fields = (root: HTMLElement) =>
     [...root.querySelectorAll<HTMLInputElement | HTMLSelectElement>(".conn-field input, .conn-field select")];
 
@@ -39,7 +39,7 @@ describe("connections pane", () => {
         });
         const selected = pane.root.querySelector(".settings-key.selected");
         expect(selected?.textContent).toContain("Prod");
-        const [name, host, user, pw, schema, naming, tls, savePw] = fields(pane.root);
+        const [name, host, user, pw, schema, naming, bidi, tls, savePw] = fields(pane.root);
         expect((name as HTMLInputElement).value).toBe("Prod");
         expect((host as HTMLInputElement).value).toBe("prod.ibmi");
         expect((user as HTMLInputElement).value).toBe("COZZI");
@@ -49,6 +49,7 @@ describe("connections pane", () => {
         });
         expect((schema as HTMLInputElement).value).toBe("QIWS");
         expect((naming as HTMLSelectElement).value).toBe("system");
+        expect((bidi as HTMLSelectElement).value).toBe("");
         expect((tls as HTMLInputElement).checked).toBe(true);
         expect((savePw as HTMLInputElement).checked).toBe(true);
         pane.root.remove();

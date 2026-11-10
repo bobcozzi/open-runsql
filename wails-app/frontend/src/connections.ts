@@ -76,6 +76,23 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
         o.textContent = label;
         inNaming.appendChild(o);
     }
+    // Bidi string type: JT400 JDBC property for hosts storing Arabic/Hebrew
+    // text (CCSID 420/424...). "" = driver default (no URL change); the rest
+    // mirror BidiStringType: 4=visual/shaped (legacy 420), 5=implicit LTR,
+    // 6=implicit RTL, -1=no bidi conversion.
+    const inBidi = document.createElement("select");
+    for (const [v, key, fb] of [
+        ["", "conn.bidiDefault", "Driver default"],
+        ["4", "conn.bidi4", "4 - Visual, shaped (legacy CCSID 420)"],
+        ["5", "conn.bidi5", "5 - Implicit LTR (JT400 default)"],
+        ["6", "conn.bidi6", "6 - Implicit RTL"],
+        ["-1", "conn.bidiNone", "None - no bidi conversion"],
+    ] as const) {
+        const o = document.createElement("option");
+        o.value = v;
+        o.textContent = t(key, fb);
+        inBidi.appendChild(o);
+    }
     const inTls = document.createElement("input");
     inTls.type = "checkbox";
     const inSavePw = document.createElement("input");
@@ -118,6 +135,7 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
     row("conn.password", "Password", inPassword);
     row("conn.schema", "Default schema", inSchema);
     row("conn.naming", "Naming", inNaming);
+    row("conn.bidi", "Bidi string type", inBidi);
     row("conn.tls", "Secure (TLS)", inTls);
     row("conn.savePassword", "Save password", inSavePw);
     row("conn.preloadSpool", "Preload spooled files at connect", inPreload);
@@ -169,6 +187,7 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
     for (const field of [inName, inHost, inUser, inSchema, inPassword, inScript]) {
         field.addEventListener("input", () => { dirtyMarker.hidden = false; });
     }
+    inBidi.addEventListener("change", () => { dirtyMarker.hidden = false; });
     inNaming.addEventListener("change", () => { dirtyMarker.hidden = false; });
     inTls.addEventListener("change", () => { dirtyMarker.hidden = false; });
     inSavePw.addEventListener("change", () => { dirtyMarker.hidden = false; });
@@ -183,6 +202,7 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
             name: inName.value.trim() || host,
             host,
             user: inUser.value.trim(),
+            bidiStringType: inBidi.value,
             defaultSchema: inSchema.value.trim(),
             naming: inNaming.value,
             tls: inTls.checked,
@@ -224,6 +244,7 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
                 inPassword.value = passwordStored ? STORED_MASK : "";
             }).catch(() => { /* vault miss: leave empty */ });
         }
+        inBidi.value = p?.bidiStringType ?? "";
         inSchema.value = p?.defaultSchema ?? "";
         inNaming.value = p?.naming || "sql";
         inTls.checked = !!p?.tls;

@@ -162,6 +162,8 @@ export interface ConnectionProfile {
     defaultSchema?: string;
     naming?: string;
     tls: boolean;
+    /** JT400 "bidi string type" for Arabic/Hebrew hosts; "" = driver default. */
+    bidiStringType?: string;
     savePassword?: boolean;
     preloadSpool?: boolean; // undefined = on
     saveScript?: boolean; // undefined = on ("Save SQL/CL script between sessions")

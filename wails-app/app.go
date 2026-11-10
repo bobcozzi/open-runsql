@@ -32,6 +32,9 @@ type ConnectRequest struct {
 	Naming        string `json:"naming"`
 	DefaultSchema string `json:"defaultSchema"`
 	FetchSize     int    `json:"fetchSize"`
+	// BidiStringType: JT400 "bidi string type" JDBC property. "" = driver
+	// default (no URL change). One of "-1","0","4","5","6","7","8","9","10","11".
+	BidiStringType string `json:"bidiStringType,omitempty"`
 }
 
 type ConnectResponse struct {
@@ -249,7 +252,10 @@ type ConnectionProfile struct {
 	DefaultSchema string `json:"defaultSchema,omitempty"`
 	Naming        string `json:"naming,omitempty"`
 	TLS           bool   `json:"tls"`
-	SavePassword  bool   `json:"savePassword,omitempty"`
+	// BidiStringType: JT400 "bidi string type" for hosts storing Arabic/Hebrew
+	// (CCSID 420/424 etc.). "" = driver default; no JDBC URL change when unset.
+	BidiStringType string `json:"bidiStringType,omitempty"`
+	SavePassword   bool   `json:"savePassword,omitempty"`
 	// PreloadSpool: fetch the spooled-file list at connect (default on).
 	PreloadSpool *bool `json:"preloadSpool,omitempty"`
 	// Script: SQL/CL text saved with the profile; restored into the editor on
@@ -866,7 +872,7 @@ func (a *App) Connect(req ConnectRequest) (*ConnectResponse, error) {
 		"host": host, "user": user, "password": req.Password,
 		"tls": req.TLS, "naming": normalizeNaming(req.Naming),
 		"defaultSchema": req.DefaultSchema, "timeoutSeconds": 30,
-		"fetchSize": fetchSize,
+		"fetchSize": fetchSize, "bidiStringType": strings.TrimSpace(req.BidiStringType),
 	})
 	if err != nil {
 		return nil, err

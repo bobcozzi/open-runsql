@@ -94,6 +94,12 @@ public final class Main {
                 String naming = text(r, "naming", "sql").toLowerCase(Locale.ROOT);
                 if (!naming.equals("sql") && !naming.equals("system"))
                     throw new IllegalArgumentException("naming must be 'sql' or 'system'");
+                // Bidi string type: "" = driver default (JT400 picks per job
+                // CCSID; ST5 today). Only appended when the profile sets one —
+                // default connections get a byte-identical URL to before.
+                String bidi = text(r, "bidiStringType", "").trim();
+                if (!bidi.isEmpty() && !bidi.matches("-1|0|[45]|6|7|8|9|10|11"))
+                    throw new IllegalArgumentException("bidiStringType must be one of -1,0,4,5,6,7,8,9,10,11");
 
                 String url = "jdbc:as400://" + host + ";prompt=false;naming=" + naming
                         // Extended metadata: resolve column headings/labels fully.
@@ -103,6 +109,7 @@ public final class Main {
                         // keep-alive lets healthy sessions ride out Wi-Fi blips.
                         + ";socket timeout=15000;keep alive=true";
                 if (tls) url += ";secure=true";
+                if (!bidi.isEmpty()) url += ";bidi string type=" + bidi;
 
                 Properties props = new Properties();
                 props.setProperty("user", user);
