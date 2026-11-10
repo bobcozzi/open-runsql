@@ -544,6 +544,13 @@ input[type="checkbox"]:focus-visible {
     border-color: var(--accent);
 }
 
+/* macOS toggles are green when on; elsewhere the accent (blue) reads as "on"
+ * for the mostly-Windows user base. */
+[data-os="mac"] .switch.on {
+    background: #34c759;
+    border-color: #34c759;
+}
+
 .switch.on .switch-knob {
     left: 18px;
 }

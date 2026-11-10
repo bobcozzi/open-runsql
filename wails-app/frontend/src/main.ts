@@ -102,6 +102,11 @@ function initTheme(): void {
 }
 initTheme();
 
+// Tag the OS so CSS can pick platform-native switch colors (green on macOS,
+// accent blue elsewhere). navigator.userAgent is reliable enough here.
+document.documentElement.dataset.os =
+    /mac/i.test(navigator.userAgent) ? "mac" : "other";
+
 // Static index.html strings: the English markup is the fallback/pre-JS paint;
 // overwrite textContent/title/placeholder from the catalog once at boot.
 // Only elements that have ids in index.html are handled here.
@@ -151,23 +156,33 @@ applyL10nToStaticDom();
 // role=switch) with the I/O state glyph and a live state hint. They keep the
 // ids in-tls / in-save-password so all the existing .checked reads work
 // unchanged (SwitchControl exposes `checked`).
-function mountQcSwitch(mountId: string, stateId: string, id: string, aria: string, onText: string, offText: string): void {
+// Quick Connect switches: TLS + Save password as real switches (button
+// role=switch) with the I/O state glyph and a live state hint. They keep the
+// ids in-tls / in-save-password so all the existing .checked reads work
+// unchanged (SwitchControl exposes `checked`). persistKey makes the user's
+// choice sticky across launches (localStorage) for first-time/new connections.
+function mountQcSwitch(mountId: string, stateId: string, id: string, aria: string, onText: string, offText: string, persistKey: string): void {
     const mount = document.getElementById(mountId);
     if (!mount) return;
-    const sw = createSwitch(false, aria);
+    // Restore the sticky value (default off when never set).
+    const sticky = persistKey ? localStorage.getItem(persistKey) === "1" : false;
+    const sw = createSwitch(sticky, aria);
     sw.id = id;
     const hint = document.getElementById(stateId);
     const paint = () => {
         if (hint) hint.textContent = sw.checked ? onText : offText;
     };
     paint();
-    sw.addEventListener("change", paint);
+    sw.addEventListener("change", () => {
+        paint();
+        if (persistKey) localStorage.setItem(persistKey, sw.checked ? "1" : "0");
+    });
     mount.appendChild(sw);
 }
 mountQcSwitch("in-tls-mount", "in-tls-state", "in-tls", t("conn.tls", "Secure (TLS)"),
-    t("switch.on", "On"), t("switch.off", "Off"));
+    t("switch.on", "On"), t("switch.off", "Off"), "ibmi-runsql-qc-tls");
 mountQcSwitch("in-save-password-mount", "in-save-password-state", "in-save-password", t("conn.savePassword", "Save password"),
-    t("conn.savePwOn", "On — stored in the OS credential vault"), t("conn.savePwOff", "Off — not stored"));
+    t("conn.savePwOn", "On — stored in the OS credential vault"), t("conn.savePwOff", "Off — not stored"), "ibmi-runsql-qc-savepw");
 
 // --- Work-area panes (bottom tabs): results, messages, dynamic prompter panes ---
 let activePane = "results";
@@ -1491,8 +1506,17 @@ function restoreActiveTab(): void {
     el<HTMLInputElement>("in-password").value = cf?.password ?? "";
     el<HTMLInputElement>("in-schema").value = cf?.schema ?? "";
     el<HTMLSelectElement>("in-naming").value = cf?.naming ?? "sql";
-    el<HTMLInputElement>("in-tls").checked = cf?.tls ?? false;
-    el<HTMLInputElement>("in-save-password").checked = cf?.savePassword ?? false;
+    // TLS / Save password: a tab with its own form state wins; a fresh tab
+    // falls back to the user's sticky localStorage choice (not a hard false).
+    el<HTMLInputElement>("in-tls").checked = cf?.tls ?? (localStorage.getItem("ibmi-runsql-qc-tls") === "1");
+    el<HTMLInputElement>("in-save-password").checked = cf?.savePassword ?? (localStorage.getItem("ibmi-runsql-qc-savepw") === "1");
+    // A blank/fresh form means no saved profile is armed on this tab — disarm
+    // and hide GO (it only appears for a picked saved profile). dataset.armed
+    // lives on the shared button, so clear it or a prior tab's pick leaks over.
+    if (!cf?.host) {
+        const go = document.getElementById("btn-go") as HTMLButtonElement | null;
+        if (go) { delete go.dataset.armed; go.disabled = true; go.hidden = true; }
+    }
     pushWorkspaceState();
 }
 
@@ -1639,10 +1663,13 @@ function syncConnectionUi(): void {
         : t("main.notConnected", "Not connected");
     els.badge.className = `badge ${connected ? "connected" : "disconnected"}`;
     els.btnConnect.disabled = connected;
-    // GO mirrors Connect: enabled when a saved profile was picked and this
-    // tab is not connected (re-arms after a failed connect or disconnect).
+    // GO shows only when a saved profile is armed (picked from the dropdown);
+    // new/unsaved connections use the Connect button, so GO hides for them.
     const goBtn = document.getElementById("btn-go") as HTMLButtonElement | null;
-    if (goBtn) goBtn.disabled = connected || !goBtn.dataset.armed;
+    if (goBtn) {
+        goBtn.disabled = connected || !goBtn.dataset.armed;
+        goBtn.hidden = connected || !goBtn.dataset.armed;
+    }
     els.btnDisconnect.disabled = !connected;
     els.btnRun.disabled = !connected;
     els.btnRunAll.disabled = !connected;
@@ -3084,13 +3111,15 @@ el<HTMLInputElement>("in-password").addEventListener("keydown", (ev: KeyboardEve
     if (ev.key === "Enter") void doConnect();
 });
 
-// Disable the quick-connect GO button once the user edits the form manually.
+// Disable AND hide the quick-connect GO button once the user edits the form
+// manually (GO is only for a picked saved profile; new connections use Connect).
 ["in-host", "in-user", "in-password"].forEach((id) => {
     document.getElementById(id)?.addEventListener("input", () => {
         const go = document.getElementById("btn-go") as HTMLButtonElement | null;
         if (go) {
             delete go.dataset.armed;
             go.disabled = true;
+            go.hidden = true;
         }
     });
 });
@@ -3190,20 +3219,17 @@ function renderSavedHosts(filter = ""): void {
             if (go && !activeTab()?.connectionId) {
                 go.dataset.armed = "1";
                 go.disabled = false;
+                go.hidden = false;
             }
         });
         popup.appendChild(item);
     };
     if (matches.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "combo-item combo-empty";
-        empty.textContent = q
-            ? t("main.noMatchingConnections", "No connections match.")
-            : t("main.noSavedConnections", "No saved connections yet — connect once and it will appear here.");
-        popup.appendChild(empty);
-    } else {
-        matches.forEach(addItem);
+        // Nothing to pick — don't leave an empty popup covering the GO button.
+        popup.hidden = true;
+        return;
     }
+    matches.forEach(addItem);
     popup.hidden = false;
 }
 
@@ -3231,6 +3257,10 @@ const updateClearHost = () => { btnClearHost.hidden = hostInput.value === ""; };
 }
 hostInput.addEventListener("focus", () => {
     if (profiles.length > 0) renderSavedHosts(hostInput.value);
+});
+hostInput.addEventListener("keydown", (ev) => {
+    // Escape closes the saved-connections dropdown so it can't cover GO.
+    if (ev.key === "Escape") el<HTMLDivElement>("saved-hosts-popup").hidden = true;
 });
 hostInput.addEventListener("input", () => {
     updateClearHost();
