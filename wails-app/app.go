@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -290,6 +291,8 @@ type App struct {
 	workspace   *WorkspaceStore
 	// detached maps connectionId -> torn-off window (native v3 windows).
 	detached map[string]*application.WebviewWindow
+	// pinnedWins maps "connectionId/pinId" -> read-only pinned-result window.
+	pinnedWins map[string]*application.WebviewWindow
 }
 
 type connState struct {
@@ -330,6 +333,8 @@ func (a *App) ServiceStartup(_ context.Context, _ application.ServiceOptions) er
 }
 
 func (a *App) ServiceShutdown() error {
+	// Close any popped-out pinned-result windows so they don't outlive the app.
+	a.CloseAllPinnedWindows()
 	a.closeClient()
 	return nil
 }
@@ -1059,6 +1064,101 @@ func (a *App) UpdateStatusText(connectionID, text string) {
 	a.workspace.Update(connectionID, func(w *WorkspaceState) {
 		w.StatusText = text
 	})
+}
+
+// UpdatePinnedResults replaces the pinned (retained) result sets for a
+// connection so torn-off windows and reattach render the same pinned tabs.
+func (a *App) UpdatePinnedResults(connectionID string, pinned []PinnedResult) {
+	a.workspace.Update(connectionID, func(w *WorkspaceState) {
+		w.PinnedResults = pinned
+	})
+}
+
+// OpenPinnedWindow opens a read-only grid window showing one pinned result.
+// The snapshot (columns+rows) is passed wholesale in the URL query, so the
+// window is fully static — no connection, cursor, or workspace involvement.
+// Re-clicking an already-open pin focuses its window instead of duplicating.
+func (a *App) OpenPinnedWindow(connectionID, pinID, title string) error {
+	if a.app == nil {
+		return errors.New("application not ready")
+	}
+	key := connectionID + "/" + pinID
+	a.mu.Lock()
+	if existing, ok := a.pinnedWins[key]; ok && existing != nil {
+		a.mu.Unlock()
+		existing.Focus()
+		return nil
+	}
+	a.mu.Unlock()
+	// Pull the frozen snapshot to embed in the URL (self-contained window).
+	var snap *PinnedResult
+	ws := a.workspace.GetWorkspace(connectionID)
+	for _, p := range ws.PinnedResults {
+		if p.ID == pinID {
+			cp := p
+			snap = &cp
+			break
+		}
+	}
+	if snap == nil {
+		return fmt.Errorf("pinned result not found: %s", pinID)
+	}
+	label := snap.Label
+	if title != "" {
+		label = title
+	}
+	// Encode the snapshot so the window renders standalone (no connection).
+	payload, err := json.Marshal(map[string]any{
+		"label": label, "columns": snap.Columns, "rows": snap.Rows,
+	})
+	if err != nil {
+		return err
+	}
+	w := a.app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:            label,
+		Width:            900,
+		Height:           640,
+		MinWidth:         480,
+		MinHeight:        320,
+		BackgroundColour: application.NewRGB(30, 30, 30),
+		URL:              "/pinned.html?data=" + url.QueryEscape(base64.StdEncoding.EncodeToString(payload)),
+	})
+	a.mu.Lock()
+	if a.pinnedWins == nil {
+		a.pinnedWins = map[string]*application.WebviewWindow{}
+	}
+	a.pinnedWins[key] = w
+	a.mu.Unlock()
+	w.OnWindowEvent(events.Mac.WindowShouldClose, func(e *application.WindowEvent) {
+		w.Close()
+	})
+	w.OnWindowEvent(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		a.mu.Lock()
+		delete(a.pinnedWins, key)
+		a.mu.Unlock()
+		// Tell the main window this pinned result's pop-out closed so it can
+		// restore the subtab (pop-out moves the pin into the window).
+		if a.app != nil {
+			a.app.Event.Emit("pinned:closed", map[string]string{"connectionId": connectionID, "pinId": pinID})
+		}
+	})
+	w.Show()
+	return nil
+}
+
+// CloseAllPinnedWindows closes every open pinned-result pop-out window. Called
+// from the frontend button and from ServiceShutdown so popped-out windows never
+// outlive the app.
+func (a *App) CloseAllPinnedWindows() {
+	a.mu.Lock()
+	wins := a.pinnedWins
+	a.pinnedWins = map[string]*application.WebviewWindow{}
+	a.mu.Unlock()
+	for _, w := range wins {
+		if w != nil {
+			w.Close()
+		}
+	}
 }
 
 // DetachConnection opens a torn-off window for a connection. Native v3: a new

@@ -104,17 +104,21 @@ public final class Main {
                 String url = "jdbc:as400://" + host + ";prompt=false;naming=" + naming
                         // Extended metadata: resolve column headings/labels fully.
                         + ";extended metadata=true;metadata source=-1"
-                        // Socket-level connect timeout so a dead path fails fast
-                        // with the real error instead of a wrapped generic one;
-                        // keep-alive lets healthy sessions ride out Wi-Fi blips.
-                        + ";socket timeout=15000;keep alive=true";
+                        // socket timeout=0 => no read ceiling on query/fetch:
+                        // long-running SQL on latent links must not be killed
+                        // mid-read (08S01 "Read timed out"). The user aborts
+                        // via Cancel (Statement.cancel). keep-alive rides out
+                        // Wi-Fi blips.
+                        + ";socket timeout=0;keep alive=true";
                 if (tls) url += ";secure=true";
                 if (!bidi.isEmpty()) url += ";bidi string type=" + bidi;
 
                 Properties props = new Properties();
                 props.setProperty("user", user);
                 props.setProperty("password", password);
-                int timeout = r.path("timeoutSeconds").asInt(30);
+                // Connect/login handshake bounded at the IBM i default 20s so a
+                // dead host fails fast even with socket timeout=0 above.
+                int timeout = r.path("timeoutSeconds").asInt(20);
                 DriverManager.setLoginTimeout(Math.max(1, timeout));
 
                 // Resolve first so DNS/lookup failures surface as the real
@@ -150,9 +154,12 @@ public final class Main {
                         ? new SecureAS400(host, user, passwordChars)
                         : new AS400(host, user, passwordChars);
                 clSystem.setGuiAvailable(false);
-                // Same socket hardening for the CL/print services connection.
+                // CL/print services connection. CL can run long (CPYF etc.) and
+                // has no cancel, so bound reads generously (120s) rather than
+                // the fail-fast 15s. Spool listing overrides this to 300s around
+                // its op (restored in finally).
                 com.ibm.as400.access.SocketProperties sp = clSystem.getSocketProperties();
-                sp.setSoTimeout(15000);
+                sp.setSoTimeout(120_000);
                 sp.setKeepAlive(true);
                 clSystem.setSocketProperties(sp);
                 Session s = new Session(c, clSystem);

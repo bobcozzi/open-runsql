@@ -34,6 +34,15 @@ export interface SqlResult {
     error?: string;
 }
 
+// A frozen, retained result set pinned in the Results pane. Static — never
+// re-queried; renamed/closed by the user.
+export interface PinnedResult {
+    id: string;
+    label: string;
+    columns: ColumnInfo[];
+    rows: unknown[][];
+}
+
 export interface CLMessage {
     id: string;
     severity: number;
@@ -231,6 +240,9 @@ export interface AppBinding {
     UpdateEditorText(connectionId: string, text: string): Promise<void>;
     UpdateMessagesHTML(connectionId: string, html: string): Promise<void>;
     UpdateStatusText(connectionId: string, text: string): Promise<void>;
+    UpdatePinnedResults(connectionId: string, pinned: PinnedResult[]): Promise<void>;
+    OpenPinnedWindow(connectionId: string, pinId: string, title: string): Promise<void>;
+    CloseAllPinnedWindows(): Promise<void>;
     DetachedConnectionID(): Promise<string>;
     Version(): Promise<string>;
 }

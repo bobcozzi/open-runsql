@@ -59,6 +59,16 @@ export function CancelSpoolList(connectionID) {
 }
 
 /**
+ * CloseAllPinnedWindows closes every open pinned-result pop-out window. Called
+ * from the frontend button and from ServiceShutdown so popped-out windows never
+ * outlive the app.
+ * @returns {$CancellablePromise<void>}
+ */
+export function CloseAllPinnedWindows() {
+    return $Call.ByID(1503359701);
+}
+
+/**
  * Connect opens a new JDBC connection to the IBM i.
  * @param {$models.ConnectRequest} req
  * @returns {$CancellablePromise<$models.ConnectResponse | null>}
@@ -296,6 +306,20 @@ export function OpenFileAs(filterLabel, filterPattern) {
 }
 
 /**
+ * OpenPinnedWindow opens a read-only grid window showing one pinned result.
+ * The snapshot (columns+rows) is passed wholesale in the URL query, so the
+ * window is fully static — no connection, cursor, or workspace involvement.
+ * Re-clicking an already-open pin focuses its window instead of duplicating.
+ * @param {string} connectionID
+ * @param {string} pinID
+ * @param {string} title
+ * @returns {$CancellablePromise<void>}
+ */
+export function OpenPinnedWindow(connectionID, pinID, title) {
+    return $Call.ByID(1870787811, connectionID, pinID, title);
+}
+
+/**
  * OpenSpoolDownloadDir opens the configured spool download folder in the OS
  * file manager.
  * @returns {$CancellablePromise<void>}
@@ -444,6 +468,17 @@ export function UpdateEditorText(connectionID, text) {
  */
 export function UpdateMessagesHTML(connectionID, html) {
     return $Call.ByID(1020333933, connectionID, html);
+}
+
+/**
+ * UpdatePinnedResults replaces the pinned (retained) result sets for a
+ * connection so torn-off windows and reattach render the same pinned tabs.
+ * @param {string} connectionID
+ * @param {$models.PinnedResult[]} pinned
+ * @returns {$CancellablePromise<void>}
+ */
+export function UpdatePinnedResults(connectionID, pinned) {
+    return $Call.ByID(2252305948, connectionID, pinned);
 }
 
 /**

@@ -16,6 +16,7 @@ import {
     type ColumnInfo,
     type ConnectionProfile,
     type ConnectResponse,
+    type PinnedResult as PinnedResultType,
     type SqlMessage,
     type SqlResult,
 } from "./types";
@@ -27,7 +28,7 @@ import { buildSpooledFileRequest, createSpoolPane, isAfpdsFile, type SpoolFilter
 import { createSettingsPane, type SettingDef } from "./settings";
 import { createConnectionsPane } from "./connections";
 import { renderScsBytes, formatOsVersion } from "./scsRender";
-import { formatResultData, type SaveFormat } from "./resultExport";
+import { formatResultData, unescapeDelimiter, type SaveFormat } from "./resultExport";
 import { showHistoryPicker } from "./stmtHistory";
 import type { SpooledFileInfo } from "./types";
 import { t } from "./l10n";
@@ -64,7 +65,9 @@ const els = {
     btnLoadAll: el<HTMLButtonElement>("btn-load-all"),
     saveResultsWrap: el<HTMLSpanElement>("save-results-wrap"),
     btnSaveResults: el<HTMLButtonElement>("btn-save-results"),
+    btnPinResult: el<HTMLButtonElement>("btn-pin-result"),
     selSaveFormat: el<HTMLSelectElement>("sel-save-format"),
+    resultSubtabs: el<HTMLDivElement>("result-subtabs"),
 };
 
 // --- Color mode (light/dark/system) ---
@@ -1182,8 +1185,10 @@ interface ResultSnapshot {
     messagesHtml: string;
     messagesVisible: boolean;
     showingResults: boolean;
+    // Retained (pinned) result sets + which subtab was active.
+    pinnedResults?: PinnedResult[];
+    activePinnedId?: string;
     // Work pane the tab was last showing (results/messages/spool/...) —
-    // restored on tab switch so e.g. Spooled Files stays put.
     activePane?: string;
     // Last-opened/saved .sql filename for Save As prefill (per tab).
     scriptFile?: string;
@@ -1213,6 +1218,29 @@ const state: AppState = {
     sortCol: -1,
     sortDir: 1,
 };
+
+// --- Pinned (retained) results ---
+// A pinned result is a frozen snapshot kept beside the live "Latest" grid
+// inside the Results pane. Never re-queried; closed via its subtab's ×.
+type PinnedResult = PinnedResultType;
+let pinnedResults: PinnedResult[] = [];
+let activePinnedId = ""; // "" = Latest (the live result)
+let pinnedSeq = 0;
+const PIN_LABEL_MAX = 32;
+// Pins currently popped out into their own window: hidden from the subtab
+// strip (the window holds the data) but kept here so they restore on close.
+const poppedOutPins = new Set<string>();
+
+// The set the grid/export currently reflects: a pinned snapshot or Latest.
+function displayedData(): { columns: ColumnInfo[]; rows: unknown[][]; pinned: boolean } {
+    const p = activePinnedId ? pinnedResults.find((r) => r.id === activePinnedId) : undefined;
+    return p ? { columns: p.columns, rows: p.rows, pinned: true } : { columns: state.columns, rows: state.rows, pinned: false };
+}
+
+function syncPinnedWorkspace(): void {
+    const connId = activeTab()?.connectionId;
+    if (connId) void App()?.UpdatePinnedResults(connId, pinnedResults.map((p) => ({ ...p })));
+}
 
 // Connection tabs: each tab binds the shared editor/results pane to its own
 // IBM i connection. Active tab's connectionId is what Run/Fetch use.
@@ -1301,6 +1329,8 @@ function snapshotActiveTab(): void {
         messagesHtml: els.messageList.innerHTML,
         messagesVisible: els.messageList.children.length > 0,
         showingResults: els.resultBody.children.length > 0 || els.resultHead.children.length > 0,
+        pinnedResults: pinnedResults.map((p) => ({ ...p, columns: [...p.columns], rows: p.rows.map((r) => [...r]) })),
+        activePinnedId,
         activePane,
         connForm: {
             host: el<HTMLInputElement>("in-host").value,
@@ -1322,22 +1352,30 @@ function restoreActiveTab(): void {
     state.more = snap?.more ?? false;
     state.sortCol = -1;
     state.sortDir = 1;
+    pinnedResults = (snap?.pinnedResults ?? []).map((p) => ({ ...p, columns: [...p.columns], rows: p.rows.map((r) => [...r]) }));
+    activePinnedId = snap?.activePinnedId ?? "";
     els.sqlInput.value = snap?.editorText ?? "";
     // Restore the pane the tab was last showing (defaults to Results);
     // otherwise switching away from Spooled Files and back jumps to Results.
     const pane = snap?.activePane ?? "results";
     if (snap?.showingResults) {
+        renderResultSubtabs();
         renderTable();
         els.statusText.textContent = snap.statusText;
-        els.btnLoadMore.hidden = !state.more;
-        els.btnLoadAll.hidden = !state.more;
+        const pinnedView = !!activePinnedId;
+        els.btnLoadMore.hidden = pinnedView || !state.more;
+        els.btnLoadAll.hidden = pinnedView || !state.more;
+        els.saveResultsWrap.hidden = displayedData().rows.length === 0;
+        els.btnPinResult.hidden = pinnedView || displayedData().rows.length === 0;
     } else {
         els.resultHead.innerHTML = "";
         els.resultBody.innerHTML = "";
         els.statusText.textContent = "";
         els.btnLoadMore.hidden = true;
         els.btnLoadAll.hidden = true;
+        renderResultSubtabs();
     }
+    if (!snap?.showingResults) els.btnPinResult.hidden = true;
     showPane(pane);
     // Spooled Files: refresh when the visible list belongs to a different
     // connection (mirrors the work-tab click handler's stale reload).
@@ -1413,6 +1451,7 @@ async function addDetachedTab(connectionId: string): Promise<void> {
     let ws: {
         label?: string; editorText?: string; statusText?: string; messagesHtml?: string;
         columns?: ColumnInfo[]; rows?: unknown[][]; cursorId?: string; more?: boolean; showingResults?: boolean;
+        pinnedResults?: PinnedResult[];
     } = {};
     try {
         ws = (await app.GetWorkspace(connectionId)) as typeof ws;
@@ -1431,6 +1470,8 @@ async function addDetachedTab(connectionId: string): Promise<void> {
         messagesHtml: ws.messagesHtml ?? "",
         messagesVisible: !!ws.messagesHtml,
         showingResults,
+        pinnedResults: (ws.pinnedResults ?? []).map((p) => ({ ...p })),
+        activePinnedId: "",
     };
     restoreActiveTab();
     renderTabs();
@@ -1448,6 +1489,11 @@ if (!detachedConnId) {
     Events.On("workspace:reattach", (ev: { data?: { connectionId?: string } }) => {
         const id = ev?.data?.connectionId;
         if (id) void addDetachedTab(id);
+    });
+    // A popped-out pinned result window closed: restore its subtab in the strip.
+    Events.On("pinned:closed", (ev: { data?: { pinId?: string } }) => {
+        const pinId = ev?.data?.pinId;
+        if (pinId && poppedOutPins.delete(pinId)) renderResultSubtabs();
     });
 }
 
@@ -1687,13 +1733,19 @@ function renderTable(): void {
     els.resultHead.innerHTML = "";
     els.resultBody.innerHTML = "";
 
+    // Render the current view (live result or a pinned snapshot) WITHOUT
+    // copying into shared state — the live result must survive pin browsing.
+    const view = displayedData();
+    const cols = view.columns;
+    const rows = view.rows;
+
     const headRow = document.createElement("tr");
     const rowNumTh = document.createElement("th");
     rowNumTh.className = "row-index";
     rowNumTh.textContent = "ROW";
     headRow.appendChild(rowNumTh);
 
-    state.columns.forEach((c, idx) => {
+    cols.forEach((c, idx) => {
         const th = document.createElement("th");
         const text = columnLabel(c);
         if (displaySettings.stackedColumnHeadings) {
@@ -1727,9 +1779,9 @@ function renderTable(): void {
     });
     els.resultHead.appendChild(headRow);
 
-    const viewRows = [...state.rows];
+    const viewRows = [...rows];
     if (state.sortCol >= 0) {
-        const col = state.columns[state.sortCol];
+        const col = cols[state.sortCol];
         const dir = state.sortDir;
         const sortIdx = state.sortCol;
         viewRows.sort((a, b) => {
@@ -1750,7 +1802,7 @@ function renderTable(): void {
         idxTd.className = "row-index";
         idxTd.textContent = String(i + 1);
         tr.appendChild(idxTd);
-        state.columns.forEach((c, ci) => {
+        cols.forEach((c, ci) => {
             const td = document.createElement("td");
             const { text, isNull } = formatCellText(row[ci], c);
             if (isNull) {
@@ -1767,6 +1819,169 @@ function renderTable(): void {
         frag.appendChild(tr);
     });
     els.resultBody.appendChild(frag);
+}
+
+// --- Pinned-result subtabs ---------------------------------------------
+// Rendered inside #pane-results, only when at least one pin exists. First
+// subtab is always the live "Latest"; pinned subtabs follow with a × to
+// close. Double-click / right-click a pinned subtab to rename (<=32 chars).
+function renderResultSubtabs(): void {
+    const strip = els.resultSubtabs;
+    strip.innerHTML = "";
+    if (pinnedResults.length === 0) {
+        strip.hidden = true;
+        return;
+    }
+    strip.hidden = false;
+
+    const mk = (id: string, label: string, pinned: PinnedResult | undefined): HTMLButtonElement => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "result-subtab" + (activePinnedId === id ? " active" : "");
+        b.dataset.pinId = id;
+        const span = document.createElement("span");
+        span.className = "result-subtab-label";
+        span.textContent = label;
+        b.appendChild(span);
+        if (pinned) {
+            b.title = t("result.pinTabTitle", "Pinned result — double-click or right-click to rename");
+            // Pop out into a standalone read-only window for side-by-side.
+            const pop = document.createElement("span");
+            pop.className = "result-subtab-pop";
+            pop.textContent = "↗"; // arrow out
+            pop.title = t("result.popOut", "Open in its own window");
+            pop.addEventListener("click", (ev) => {
+                ev.stopPropagation();
+                const connId = activeTab()?.connectionId ?? "";
+                const app = App();
+                if (!connId || !app || typeof app.OpenPinnedWindow !== "function") {
+                    appendLogLine(t("result.popOutUnavailable", "Pop out is not available (no connection)."), "msg-error", true);
+                    return;
+                }
+                appendLogLine(t("result.popOutOpening", "Opening \"{label}\" in its own window...").replace("{label}", pinned.label), "msg-info", true);
+                void app.OpenPinnedWindow(connId, pinned.id, pinned.label)
+                    .then(() => {
+                        // Pop-out MOVES the pin into the window: hide its subtab
+                        // (restored by the pinned:closed event when it closes).
+                        poppedOutPins.add(pinned.id);
+                        if (activePinnedId === pinned.id) selectResultSubtab("");
+                        else renderResultSubtabs();
+                    })
+                    .catch((err) => showMessages([], String((err as Error)?.message ?? err)));
+            });
+            b.appendChild(pop);
+            const x = document.createElement("span");
+            x.className = "result-subtab-close";
+            x.textContent = "×";
+            x.title = t("result.closePin", "Close pinned result");
+            x.addEventListener("click", (ev) => { ev.stopPropagation(); closePinned(pinned.id); });
+            b.appendChild(x);
+            b.addEventListener("dblclick", () => renamePinned(pinned, span));
+            b.addEventListener("contextmenu", (ev) => { ev.preventDefault(); renamePinned(pinned, span); });
+        } else {
+            b.title = t("result.latestTabTitle", "Live result (replaced on each run)");
+        }
+        b.addEventListener("click", () => selectResultSubtab(id));
+        return b;
+    };
+
+    strip.appendChild(mk("", t("result.latestTab", "Results"), undefined));
+    for (const p of pinnedResults) {
+        if (!poppedOutPins.has(p.id)) strip.appendChild(mk(p.id, p.label, p));
+    }
+
+    // "Close all pinned" at the right end of the strip (only when pins exist).
+    const spacer = document.createElement("span");
+    spacer.className = "result-subtabs-spacer";
+    strip.appendChild(spacer);
+    const closeAll = document.createElement("button");
+    closeAll.type = "button";
+    closeAll.className = "result-subtab result-subtab-closeall";
+    closeAll.textContent = t("result.closeAllPins", "Close all pinned");
+    closeAll.title = t("result.closeAllPinsTitle", "Close every pinned result tab and any popped-out pinned windows");
+    closeAll.addEventListener("click", () => {
+        pinnedResults = [];
+        poppedOutPins.clear();
+        activePinnedId = "";
+        renderResultSubtabs();
+        selectResultSubtab("");
+        syncPinnedWorkspace();
+        // Also close any popped-out pinned windows for every connection.
+        void App()?.CloseAllPinnedWindows().catch(() => { /* best effort */ });
+        appendLogLine(t("result.closedAllPins", "Closed all pinned results"), "msg-info", true);
+    });
+    strip.appendChild(closeAll);
+}
+
+function selectResultSubtab(id: string): void {
+    activePinnedId = id;
+    // Do NOT copy into state.columns/rows — renderTable reads the current view
+    // (live vs pinned) directly so the live result is never clobbered.
+    state.sortCol = -1;
+    state.sortDir = 1;
+    renderTable();
+    renderResultSubtabs();
+    const view = displayedData();
+    const pinned = !!id;
+    const total = view.rows.length;
+    els.btnLoadMore.hidden = true;
+    els.btnLoadAll.hidden = true;
+    if (!pinned) {
+        els.btnLoadMore.hidden = !state.more;
+        els.btnLoadAll.hidden = !state.more;
+    }
+    els.saveResultsWrap.hidden = total === 0;
+    els.btnPinResult.hidden = pinned || total === 0;
+    if (pinned) {
+        els.statusText.textContent = t("result.pinnedStatus", "{count} row(s) (pinned)").replace("{count}", String(total));
+    }
+}
+
+function pinCurrentResult(): void {
+    if (state.columns.length === 0 || state.rows.length === 0) return;
+    pinnedSeq += 1;
+    const label = t("result.pinLabel", "Pin {n}").replace("{n}", String(pinnedSeq));
+    pinnedResults.push({
+        id: `pin-${Date.now()}-${pinnedSeq}`,
+        label,
+        columns: state.columns.map((c) => ({ ...c })),
+        rows: state.rows.map((r) => [...r]),
+    });
+    activePinnedId = pinnedResults[pinnedResults.length - 1].id;
+    renderResultSubtabs();
+    selectResultSubtab(activePinnedId);
+    syncPinnedWorkspace();
+    appendLogLine(t("result.pinned", "Pinned result as \"{label}\"").replace("{label}", label), "msg-info", true);
+}
+
+function closePinned(id: string): void {
+    pinnedResults = pinnedResults.filter((r) => r.id !== id);
+    if (activePinnedId === id) selectResultSubtab("");
+    else renderResultSubtabs();
+    syncPinnedWorkspace();
+}
+
+function renamePinned(p: PinnedResult, span: HTMLElement): void {
+    if (span.querySelector("input")) return; // already editing
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "result-subtab-rename";
+    input.value = p.label;
+    input.maxLength = PIN_LABEL_MAX;
+    span.textContent = "";
+    span.appendChild(input);
+    input.focus();
+    input.select();
+    const commit = () => {
+        const v = input.value.trim().slice(0, PIN_LABEL_MAX);
+        if (v) { p.label = v; syncPinnedWorkspace(); }
+        renderResultSubtabs();
+    };
+    input.addEventListener("blur", commit);
+    input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") { ev.preventDefault(); commit(); }
+        else if (ev.key === "Escape") { input.removeEventListener("blur", commit); renderResultSubtabs(); }
+    });
 }
 
 function updateStatus(kind: string, result: SqlResult | undefined, totalRows: number): void {
@@ -1787,21 +2002,43 @@ function updateStatus(kind: string, result: SqlResult | undefined, totalRows: nu
     els.btnLoadAll.hidden = !state.more;
     // Save-as: only meaningful with rows on screen.
     els.saveResultsWrap.hidden = !(kind === "rows" && totalRows > 0);
+    // Load more/all page the live cursor — not applicable to a frozen pin.
+    const pinnedView = !!activePinnedId;
+    if (pinnedView) { els.btnLoadMore.hidden = true; els.btnLoadAll.hidden = true; }
+    els.btnPinResult.hidden = !(kind === "rows" && totalRows > 0) || pinnedView;
 }
 
 // Save the result grid: native Save dialog (name + location), chosen format.
+// Delimiter override applies to CSV only (TAB/JSON/Markdown have fixed layouts).
+const inSaveDelim = el<HTMLInputElement>("in-save-delim");
+function syncSaveDelimVisibility(): void {
+    const isCsv = els.selSaveFormat.value === "csv";
+    inSaveDelim.hidden = !isCsv;
+    if (isCsv && !inSaveDelim.dataset.touched) inSaveDelim.value = ",";
+}
+els.selSaveFormat.addEventListener("change", () => {
+    // Reset to the comma default on switch unless the user typed a custom one.
+    delete inSaveDelim.dataset.touched;
+    syncSaveDelimVisibility();
+});
+inSaveDelim.addEventListener("input", () => { inSaveDelim.dataset.touched = "1"; });
+syncSaveDelimVisibility();
+
 els.btnSaveResults.addEventListener("click", () => {
     void (async () => {
         const app = App();
-        if (!app || state.columns.length === 0 || state.rows.length === 0) return;
+        const { columns, rows } = displayedData();
+        if (!app || columns.length === 0 || rows.length === 0) return;
         const format = els.selSaveFormat.value as SaveFormat;
-        const text = formatResultData(state.columns, state.rows, format);
-        const host = activeTab()?.label?.split("@")[1] || "results";
+        const delim = (format === "csv" && inSaveDelim.value.length > 0) ? unescapeDelimiter(inSaveDelim.value) : undefined;
+        const text = formatResultData(columns, rows, format, delim);
+        const pinned = pinnedResults.find((r) => r.id === activePinnedId);
+        const base = pinned ? pinned.label.replace(/[^A-Za-z0-9_.-]+/g, "_") : `results_${activeTab()?.label?.split("@")[1] || "results"}`;
         const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
         const filterLabel = format.toUpperCase();
         try {
             const saved = await app.SaveFileAs(
-                `results_${host}_${stamp}.${format}`,
+                `${base}_${stamp}.${format}`,
                 btoa(unescape(encodeURIComponent(text))),
                 filterLabel, `*.${format}`);
             if (!saved) return; // canceled
@@ -1817,6 +2054,9 @@ els.btnSaveResults.addEventListener("click", () => {
 document.getElementById("btn-open-results-dir")?.addEventListener("click", () => {
     App()?.OpenSpoolDownloadDir().catch((err) => showMessages([], String((err as Error)?.message ?? err)));
 });
+
+// Pin the live result into its own retained subtab inside the Results pane.
+els.btnPinResult.addEventListener("click", () => pinCurrentResult());
 
 function showSqlResult(result: SqlResult): void {
     if (result.kind === "error") {
@@ -1842,6 +2082,9 @@ function showSqlResult(result: SqlResult): void {
         state.columns = result.columns ?? [];
         state.cursorId = result.cursorId ?? null;
         state.more = !!result.more;
+        // A fresh run always lands on the live "Latest" subtab.
+        activePinnedId = "";
+        renderResultSubtabs();
         renderTable();
         updateStatus("rows", result, state.rows.length);
         if (!activePane.startsWith("prompter-")) showPane("results");
@@ -2853,6 +3096,7 @@ if (detachedConnId) {
     interface WorkspaceMirror {
         label?: string; editorText?: string; statusText?: string; messagesHtml?: string;
         columns?: ColumnInfo[]; rows?: unknown[][]; cursorId?: string; more?: boolean; showingResults?: boolean;
+        pinnedResults?: PinnedResult[];
     }
 
     // Apply a workspace snapshot pushed from the Go store. Editor text is only
@@ -2872,14 +3116,21 @@ if (detachedConnId) {
         if (typeof ws.messagesHtml === "string" && ws.messagesHtml !== els.messageList.innerHTML) {
             els.messageList.innerHTML = ws.messagesHtml;
         }
+        if (ws.pinnedResults) {
+            pinnedResults = ws.pinnedResults.map((p) => ({ ...p }));
+            renderResultSubtabs();
+        }
         if (ws.showingResults && ws.columns) {
             state.columns = [...ws.columns];
             state.rows = (ws.rows ?? []).map((r) => [...r]);
             state.cursorId = ws.cursorId ?? null;
             state.more = !!ws.more;
             renderTable();
-            els.btnLoadMore.hidden = !state.more;
-            els.btnLoadAll.hidden = !state.more;
+            const pinnedView = !!activePinnedId;
+            els.btnLoadMore.hidden = pinnedView || !state.more;
+            els.btnLoadAll.hidden = pinnedView || !state.more;
+            els.saveResultsWrap.hidden = displayedData().rows.length === 0;
+            els.btnPinResult.hidden = pinnedView || displayedData().rows.length === 0;
             showPane("results");
         }
     };

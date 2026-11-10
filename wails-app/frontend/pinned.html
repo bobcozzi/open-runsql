@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pinned result</title>
+    <link rel="stylesheet" href="/src/style.css" />
+</head>
+
+<body class="pinned-window">
+    <header class="pinned-head">
+        <span id="pinned-title" class="pinned-title">Pinned result</span>
+        <span class="spacer"></span>
+        <span id="pinned-count" class="pinned-count"></span>
+        <select id="sel-pinned-format" class="pinned-format" title="Format">
+            <option value="csv" selected>CSV</option>
+            <option value="tsv">TAB</option>
+            <option value="json">JSON</option>
+            <option value="md">Markdown</option>
+        </select>
+        <input id="in-pinned-delim" class="save-delim" type="text" value=","
+            title="Delimiter; applies to CSV. Escapes: \t tab, \n newline, \r return, \s space" />
+        <button id="btn-pinned-save" class="btn" type="button">Save as...</button>
+    </header>
+    <div class="table-wrap pinned-body">
+        <table id="pinned-table">
+            <thead id="pinned-head"></thead>
+            <tbody id="pinned-tbody"></tbody>
+        </table>
+    </div>
+    <script type="module" src="/src/pinned.ts"></script>
+</body>
+
+</html>

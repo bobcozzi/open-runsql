@@ -9,6 +9,27 @@ export interface ResultColumn {
 
 export type SaveFormat = "csv" | "tsv" | "json" | "md";
 
+/** Interpret common backslash escapes in a delimiter box value: \t tab,
+ * \n newline, \r carriage return, \\ backslash, \s space, \| pipe, \; and \:
+ * (harmless for chars that need no escaping). Everything else passes through
+ * literally, so a raw ";" or "|" works unchanged. */
+export function unescapeDelimiter(raw: string): string {
+    return raw.replace(/\\(.)/g, (_, ch: string) => {
+        switch (ch) {
+            case "t": return "\t";
+            case "n": return "\n";
+            case "r": return "\r";
+            case "s": return " ";
+            case "\\": return "\\";
+            case "|": return "|";
+            case ";": return ";";
+            case ":": return ":";
+            case ",": return ",";
+            default: return ch; // "\x" -> "x"
+        }
+    });
+}
+
 export const SAVE_FORMATS: { id: SaveFormat; label: string; ext: string }[] = [
     { id: "csv", label: "CSV (comma-separated)", ext: "csv" },
     { id: "tsv", label: "TSV (tab-separated)", ext: "tsv" },
@@ -35,7 +56,7 @@ function heading(c: ResultColumn): string {
     return (c.label || c.name).replace(/\n+/g, " ").trim();
 }
 
-export function formatResultData(cols: ResultColumn[], rows: unknown[][], format: SaveFormat): string {
+export function formatResultData(cols: ResultColumn[], rows: unknown[][], format: SaveFormat, delimOverride?: string): string {
     const heads = cols.map(heading);
     if (format === "json") {
         const out = rows.map((r) => {
@@ -54,7 +75,11 @@ export function formatResultData(cols: ResultColumn[], rows: unknown[][], format
         ];
         return lines.join("\n") + "\n";
     }
-    const delim = format === "tsv" ? "\t" : ",";
+    // Delimited text (csv/tsv): an explicit delimiter override wins (single or
+    // multi-char); else the format default. delimitField quotes against this
+    // same delimiter, so any separator (pipe, semicolon, ...) round-trips.
+    const delim = (delimOverride && delimOverride.length > 0) ? delimOverride
+        : format === "tsv" ? "\t" : ",";
     const lines = [heads.map((h) => delimitField(h, delim)).join(delim)];
     for (const r of rows) {
         lines.push(r.map((v) => delimitField(cellText(v), delim)).join(delim));

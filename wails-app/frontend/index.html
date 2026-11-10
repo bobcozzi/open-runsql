@@ -143,13 +143,17 @@
             <span class="spacer"></span>
             <span id="status-text" class="status-inline"></span>
             <span id="save-results-wrap" class="save-results" hidden>
+                <button id="btn-pin-result" class="btn" type="button"
+                    title="Pin this result to its own tab">Pin</button>
                 <button id="btn-save-results" class="btn" type="button">Save as...</button>
                 <select id="sel-save-format" title="Format">
                     <option value="csv" selected>CSV</option>
-                    <option value="tsv">TSV</option>
+                    <option value="tsv">TAB</option>
                     <option value="json">JSON</option>
                     <option value="md">Markdown</option>
                 </select>
+                <input id="in-save-delim" class="save-delim" type="text" value=","
+                    title="Delimiter; applies to CSV. Escapes: \t tab, \n newline, \r return, \s space" hidden />
                 <button id="btn-open-results-dir" class="btn" type="button" title="Open the download folder">Open
                     Folder</button>
             </span>
@@ -158,6 +162,8 @@
         </div>
 
         <div class="work-pane" id="pane-results" data-pane="results">
+            <!-- Child tabs for pinned (retained) results; hidden until 1+ pin. -->
+            <div class="result-subtabs" id="result-subtabs" hidden></div>
             <div class="table-wrap">
                 <table id="result-table">
                     <thead id="result-head"></thead>

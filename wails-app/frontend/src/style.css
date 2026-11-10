@@ -989,6 +989,147 @@ font-size: 12px;
     overflow: auto;
 }
 
+/* Pinned-result child tabs inside the Results pane. Hidden until 1+ pin. */
+.result-subtabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: var(--bg-alt);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    flex: 0 0 auto;
+}
+
+.result-subtab {
+    background: var(--bg-input);
+    color: var(--fg-dim);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.result-subtab.active {
+    color: var(--fg);
+    border-color: var(--accent);
+    background: var(--bg);
+}
+
+.result-subtab-close {
+    color: var(--fg-dim);
+    font-size: 13px;
+    line-height: 1;
+}
+
+.result-subtab-close:hover {
+    color: var(--error);
+}
+
+.result-subtab-rename {
+    font-size: 12px;
+    padding: 1px 4px;
+    background: var(--bg-input);
+    color: var(--fg);
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    width: 12ch;
+}
+
+/* Pop-out affordance on a pinned subtab (opens a standalone window). */
+.result-subtab-pop {
+    color: var(--fg-dim);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.result-subtab-pop:hover {
+    color: var(--accent);
+}
+
+.result-subtabs-spacer {
+    flex: 1;
+}
+
+.result-subtab-closeall {
+    color: var(--fg-dim);
+    border-style: dashed;
+}
+
+.result-subtab-closeall:hover {
+    color: var(--error);
+    border-color: var(--error);
+}
+
+/* Standalone pinned-result window (pinned.html). */
+.pinned-window {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+}
+
+.pinned-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg-alt);
+    border-bottom: 1px solid var(--border);
+    flex: 0 0 auto;
+}
+
+.pinned-title {
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.pinned-count {
+    color: var(--fg-dim);
+    font-size: 12px;
+}
+
+/* Delimiter input beside the format picker (CSV only): visually narrow but
+   accepts longer text for rare multi-char separators. */
+.save-delim {
+    width: 3ch;
+    min-width: 3ch;
+    max-width: 5ch;
+    font-size: 12px;
+    padding: 3px 4px;
+    text-align: center;
+    background: var(--bg-input);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+
+.pinned-format {
+    font-size: 12px;
+    padding: 3px 6px;
+    background: var(--bg-input);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+}
+
+.pinned-head .spacer {
+    flex: 1;
+}
+
+.pinned-body {
+    flex: 1;
+    overflow: auto;
+}
+
 table {
     border-collapse: collapse;
     width: 100%;

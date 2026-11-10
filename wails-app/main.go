@@ -85,6 +85,13 @@ func main() {
 	window.OnWindowEvent(events.Mac.WindowShouldClose, func(e *application.WindowEvent) {
 		window.Close()
 	})
+	// Closing the MAIN window ends the session: close any popped-out pinned
+	// windows too so they don't outlive the app. (ServiceShutdown also covers
+	// this, but only runs at process quit — which a stray pinned window would
+	// otherwise postpone under ApplicationShouldTerminateAfterLastWindowClosed.)
+	window.OnWindowEvent(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		svc.CloseAllPinnedWindows()
+	})
 	window.Center()
 	window.Show()
 

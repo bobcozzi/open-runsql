@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatResultData } from "../src/resultExport";
+import { formatResultData, unescapeDelimiter } from "../src/resultExport";
 
 const COLS = [
     { name: "ID", label: "ID" },
@@ -41,5 +41,41 @@ describe("formatResultData", () => {
         const out = formatResultData(
             [{ name: "A", label: "A" }], [["x|y"]], "md");
         expect(out).toBe("| A |\n| --- |\n| x\\|y |\n");
+    });
+
+    it("Custom delimiter override: pipe delimits and quotes against the pipe", () => {
+        const out = formatResultData(
+            [{ name: "A", label: "A" }, { name: "B", label: "B" }],
+            [["x|y", "plain"]], "csv", "|");
+        // Pipe in data is quoted; comma no longer special.
+        expect(out).toBe('A|B\n"x|y"|plain\n');
+    });
+
+    it("Custom delimiter: semicolon and multi-char work; empty override ignored", () => {
+        const semi = formatResultData([{ name: "A", label: "A" }, { name: "B", label: "B" }], [["1", "2"]], "csv", ";");
+        expect(semi).toBe("A;B\n1;2\n");
+        // Multi-char separator is allowed (rare but supported).
+        const multi = formatResultData([{ name: "A", label: "A" }, { name: "B", label: "B" }], [["1", "2"]], "csv", "||");
+        expect(multi).toBe("A||B\n1||2\n");
+        // Empty override falls back to the format default.
+        const empty = formatResultData([{ name: "A", label: "A" }, { name: "B", label: "B" }], [["1", "2"]], "tsv", "");
+        expect(empty).toBe("A\tB\n1\t2\n");
+    });
+
+    it("unescapeDelimiter interprets backslash escapes", () => {
+        expect(unescapeDelimiter("\\t")).toBe("\t");
+        expect(unescapeDelimiter("\\n")).toBe("\n");
+        expect(unescapeDelimiter("\\r")).toBe("\r");
+        expect(unescapeDelimiter("\\s")).toBe(" ");
+        expect(unescapeDelimiter("\\\\")).toBe("\\");
+        expect(unescapeDelimiter("\\|")).toBe("|");
+        expect(unescapeDelimiter("|")).toBe("|"); // raw passes through
+        expect(unescapeDelimiter(";")).toBe(";");
+        expect(unescapeDelimiter("||")).toBe("||"); // multi-char preserved
+    });
+
+    it("CSV honors an escaped tab delimiter typed into the box", () => {
+        const out = formatResultData([{ name: "A", label: "A" }, { name: "B", label: "B" }], [["1", "2"]], "csv", unescapeDelimiter("\\t"));
+        expect(out).toBe("A\tB\n1\t2\n");
     });
 });

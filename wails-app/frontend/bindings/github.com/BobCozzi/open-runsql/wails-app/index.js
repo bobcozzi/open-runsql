@@ -21,6 +21,7 @@ export {
     OutputQueueInfo,
     OutputQueueListRequest,
     OutputQueueListResult,
+    PinnedResult,
     RunRequest,
     SpooledFileActionRequest,
     SpooledFileActionResult,

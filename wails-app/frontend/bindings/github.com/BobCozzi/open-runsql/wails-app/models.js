@@ -283,6 +283,15 @@ export class ConnectRequest {
              */
             this["fetchSize"] = 0;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * BidiStringType: JT400 "bidi string type" JDBC property. "" = driver
+             * default (no URL change). One of "-1","0","4","5","6","7","8","9","10","11".
+             * @member
+             * @type {string | undefined}
+             */
+            this["bidiStringType"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -466,6 +475,15 @@ export class ConnectionProfile {
              * @type {boolean}
              */
             this["tls"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * BidiStringType: JT400 "bidi string type" for hosts storing Arabic/Hebrew
+             * (CCSID 420/424 etc.). "" = driver default; no JDBC URL change when unset.
+             * @member
+             * @type {string | undefined}
+             */
+            this["bidiStringType"] = undefined;
         }
         if (/** @type {any} */(false)) {
             /**
@@ -790,6 +808,67 @@ export class OutputQueueListResult {
             $$parsedSource["queues"] = $$createField0_0($$parsedSource["queues"]);
         }
         return new OutputQueueListResult(/** @type {Partial<OutputQueueListResult>} */($$parsedSource));
+    }
+}
+
+/**
+ * PinnedResult is a frozen, retained result set the user pinned in the
+ * Results pane. Static snapshot — never re-queried.
+ */
+export class PinnedResult {
+    /**
+     * Creates a new PinnedResult instance.
+     * @param {Partial<PinnedResult>} [$$source = {}] - The source object to create the PinnedResult.
+     */
+    constructor($$source = {}) {
+        if (!("id" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["id"] = "";
+        }
+        if (!("label" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["label"] = "";
+        }
+        if (!("columns" in $$source)) {
+            /**
+             * @member
+             * @type {ColumnInfo[]}
+             */
+            this["columns"] = [];
+        }
+        if (!("rows" in $$source)) {
+            /**
+             * @member
+             * @type {any[][]}
+             */
+            this["rows"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PinnedResult instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {PinnedResult}
+     */
+    static createFrom($$source = {}) {
+        const $$createField2_0 = $$createType3;
+        const $$createField3_0 = $$createType5;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("columns" in $$parsedSource) {
+            $$parsedSource["columns"] = $$createField2_0($$parsedSource["columns"]);
+        }
+        if ("rows" in $$parsedSource) {
+            $$parsedSource["rows"] = $$createField3_0($$parsedSource["rows"]);
+        }
+        return new PinnedResult(/** @type {Partial<PinnedResult>} */($$parsedSource));
     }
 }
 
@@ -1120,7 +1199,7 @@ export class SpooledFileDataResult {
      * @returns {SpooledFileDataResult}
      */
     static createFrom($$source = {}) {
-        const $$createField5_0 = $$createType2;
+        const $$createField5_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("pages" in $$parsedSource) {
             $$parsedSource["pages"] = $$createField5_0($$parsedSource["pages"]);
@@ -1531,7 +1610,7 @@ export class SpooledFileResult {
      * @returns {SpooledFileResult}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType4;
+        const $$createField1_0 = $$createType8;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("files" in $$parsedSource) {
             $$parsedSource["files"] = $$createField1_0($$parsedSource["files"]);
@@ -1678,8 +1757,8 @@ export class SqlResult {
      * @returns {SqlResult}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType6;
-        const $$createField2_0 = $$createType8;
+        const $$createField1_0 = $$createType3;
+        const $$createField2_0 = $$createType5;
         const $$createField6_0 = $$createType10;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
@@ -1776,6 +1855,13 @@ export class WorkspaceState {
              */
             this["showingResults"] = false;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {PinnedResult[] | undefined}
+             */
+            this["pinnedResults"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -1786,14 +1872,18 @@ export class WorkspaceState {
      * @returns {WorkspaceState}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType6;
-        const $$createField4_0 = $$createType8;
+        const $$createField3_0 = $$createType3;
+        const $$createField4_0 = $$createType5;
+        const $$createField10_0 = $$createType12;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
             $$parsedSource["columns"] = $$createField3_0($$parsedSource["columns"]);
         }
         if ("rows" in $$parsedSource) {
             $$parsedSource["rows"] = $$createField4_0($$parsedSource["rows"]);
+        }
+        if ("pinnedResults" in $$parsedSource) {
+            $$parsedSource["pinnedResults"] = $$createField10_0($$parsedSource["pinnedResults"]);
         }
         return new WorkspaceState(/** @type {Partial<WorkspaceState>} */($$parsedSource));
     }
@@ -1802,12 +1892,14 @@ export class WorkspaceState {
 // Private type creation functions
 const $$createType0 = OutputQueueInfo.createFrom;
 const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = $Create.Array($Create.Any);
-const $$createType3 = SpooledFileInfo.createFrom;
-const $$createType4 = $Create.Array($$createType3);
-const $$createType5 = ColumnInfo.createFrom;
-const $$createType6 = $Create.Array($$createType5);
-const $$createType7 = $Create.Array($Create.Any);
+const $$createType2 = ColumnInfo.createFrom;
+const $$createType3 = $Create.Array($$createType2);
+const $$createType4 = $Create.Array($Create.Any);
+const $$createType5 = $Create.Array($$createType4);
+const $$createType6 = $Create.Array($Create.Any);
+const $$createType7 = SpooledFileInfo.createFrom;
 const $$createType8 = $Create.Array($$createType7);
 const $$createType9 = SqlMessage.createFrom;
 const $$createType10 = $Create.Array($$createType9);
+const $$createType11 = PinnedResult.createFrom;
+const $$createType12 = $Create.Array($$createType11);
