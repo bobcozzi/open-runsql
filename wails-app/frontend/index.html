@@ -36,7 +36,7 @@
 
     <div id="connect-panel" class="connect-panel" aria-label="Quick Connect">
         <div class="connect-grid">
-            <label>Host
+            <label class="f-host">Host
                 <div class="host-combo">
                     <span class="host-input-wrap">
                         <input id="in-host" type="text" autocomplete="new-password" autocorrect="off"
@@ -49,23 +49,23 @@
                     <div id="saved-hosts-popup" class="combo-popup" hidden></div>
                 </div>
             </label>
-            <label>User<input id="in-user" type="text" autocomplete="new-password" autocorrect="off"
+            <label class="f-user">User<input id="in-user" type="text" autocomplete="new-password" autocorrect="off"
                     autocapitalize="off" spellcheck="false" /></label>
-            <label>Password<input id="in-password" type="password" autocomplete="off" autocorrect="off"
+            <label class="f-password">Password<input id="in-password" type="password" autocomplete="off" autocorrect="off"
                     autocapitalize="off" spellcheck="false" /></label>
-            <label>Default schema<input id="in-schema" type="text" autocomplete="new-password" autocorrect="off"
+            <label class="f-schema">Default schema<input id="in-schema" type="text" autocomplete="new-password" autocorrect="off"
                     autocapitalize="off" spellcheck="false" placeholder="(optional)" /></label>
-            <label>Naming
+            <label class="f-naming">Naming
                 <select id="in-naming" autocomplete="off">
-                    <option value="sql" selected>SQL naming</option>
-                    <option value="system">System naming</option>
+                    <option value="sql" selected>SQL</option>
+                    <option value="system">SYS</option>
                 </select>
             </label>
-            <label class="tls-row"><input id="in-tls" type="checkbox" /> Secure (TLS)</label>
-            <button id="btn-go" class="btn btn-go" type="button" disabled title="Connect now">GO</button>
-            <label class="tls-row"
+            <label class="tls-row f-tls"><span id="in-tls-mount" class="qc-switch-mount"></span> Secure (TLS) <span id="in-tls-state" class="switch-state"></span></label>
+            <button id="btn-go" class="btn btn-go f-go" type="button" disabled title="Connect now">GO</button>
+            <label class="tls-row f-savepass"
                 title="Store the password in the OS credential vault (Keychain / Credential Manager / Secret Service)">
-                <input id="in-save-password" type="checkbox" /> Save password
+                <span id="in-save-password-mount" class="qc-switch-mount"></span> Save password <span id="in-save-password-state" class="switch-state"></span>
             </label>
         </div>
         <div class="profile-row">

@@ -389,6 +389,9 @@ type AppSettings struct {
 	// CtrlEnterRun gates the Ctrl/Cmd+Enter "run current statement" shortcut
 	// (ACS has no such key, so it's opt-in). nil/false = off.
 	CtrlEnterRun *bool `json:"ctrlEnterRun,omitempty"`
+	// ConnTabLabel: connection-tab label format. "" / "userHost" (default) |
+	// "nameHost" | "nameUserHost" | "nameUser" | "hostUser" | "name".
+	ConnTabLabel string `json:"connTabLabel,omitempty"`
 }
 
 func settingsStorePath() string {
@@ -489,6 +492,13 @@ func (a *App) SetAppSetting(key, value string) error {
 	case "confirmSpoolDelete":
 		on := strings.EqualFold(strings.TrimSpace(value), "on") || value == "true"
 		s.ConfirmSpoolDelete = &on
+	case "connTabLabel":
+		switch strings.TrimSpace(value) {
+		case "", "userHost", "nameHost", "nameUserHost", "nameUser", "hostUser", "name":
+			s.ConnTabLabel = strings.TrimSpace(value)
+		default:
+			return fmt.Errorf("invalid connection tab label: %s", value)
+		}
 	default:
 		return fmt.Errorf("unknown setting: %s", key)
 	}

@@ -28,8 +28,9 @@ function mkPane(profiles: ConnectionProfile[] = [P1, P2], over: Partial<Paramete
 }
 
 // Field order: Name, Host, User, Password, Schema, Naming, Bidi, TLS, SavePw, ...
+// (TLS/SavePw/Preload/SaveScript are span.switch controls, not input/select.)
 const fields = (root: HTMLElement) =>
-    [...root.querySelectorAll<HTMLInputElement | HTMLSelectElement>(".conn-field input, .conn-field select")];
+    [...root.querySelectorAll<HTMLInputElement | HTMLSelectElement>(".conn-field input, .conn-field select, .conn-field .switch")];
 
 describe("connections pane", () => {
     it("lists profiles and selects the first", async () => {

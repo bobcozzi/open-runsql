@@ -73,6 +73,24 @@ export class AppSettings {
              */
             this["confirmSpoolDelete"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * CtrlEnterRun gates the Ctrl/Cmd+Enter "run current statement" shortcut
+             * (ACS has no such key, so it's opt-in). nil/false = off.
+             * @member
+             * @type {boolean | null | undefined}
+             */
+            this["ctrlEnterRun"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * ConnTabLabel: connection-tab label format. "" / "userHost" (default) |
+             * "nameHost" | "nameUserHost" | "name".
+             * @member
+             * @type {string | undefined}
+             */
+            this["connTabLabel"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }

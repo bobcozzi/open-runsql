@@ -195,6 +195,9 @@ export interface AppSettings {
     spoolMaxRows?: number; // 0/undefined = unlimited
     confirmSpoolDelete?: boolean; // undefined = on
     ctrlEnterRun?: boolean; // undefined/false = off (Ctrl/Cmd+Enter runs current statement)
+    // Connection-tab label format: userHost (default) | nameHost | nameUserHost
+    // | nameUser | hostUser | name.
+    connTabLabel?: "" | "userHost" | "nameHost" | "nameUserHost" | "nameUser" | "hostUser" | "name";
 }
 
 // Wails v3: the App service is exposed via generated bindings

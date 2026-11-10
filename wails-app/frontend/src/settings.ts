@@ -6,6 +6,51 @@
 import { t } from "./l10n";
 import type { AppSettings } from "./types";
 
+/** A sliding on/off switch (span role=switch) that mimics a checkbox's
+ * interface: a `checked` property and a `change` event on toggle. A <span>, not
+ * a <button>, so no browser button chrome interferes. */
+export interface SwitchControl extends HTMLElement {
+    checked: boolean;
+}
+export function createSwitch(initial = false, ariaLabel = ""): SwitchControl {
+    // A <span>, not a <button>: no UA button chrome (white bg + padding) to
+    // override. Focusable + keyboard-operable via tabindex + Enter/Space.
+    const sw = document.createElement("span") as unknown as SwitchControl;
+    sw.className = "switch";
+    sw.setAttribute("role", "switch");
+    sw.tabIndex = 0;
+    if (ariaLabel) sw.setAttribute("aria-label", ariaLabel);
+    const knob = document.createElement("span");
+    knob.className = "switch-knob";
+    // State glyph inside the track: I when on, O when off (color alone isn't
+    // enough to read the state).
+    const glyph = document.createElement("span");
+    glyph.className = "switch-glyph";
+    sw.appendChild(glyph);
+    sw.appendChild(knob);
+    let on = initial;
+    const paint = () => {
+        sw.classList.toggle("on", on);
+        sw.setAttribute("aria-checked", String(on));
+        glyph.textContent = on ? "I" : "O";
+    };
+    paint();
+    Object.defineProperty(sw, "checked", {
+        get: () => on,
+        set: (v: boolean) => { on = !!v; paint(); },
+    });
+    const flip = () => {
+        on = !on;
+        paint();
+        sw.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    sw.addEventListener("click", flip);
+    sw.addEventListener("keydown", (ev) => {
+        if (ev.key === " " || ev.key === "Enter") { ev.preventDefault(); flip(); }
+    });
+    return sw;
+}
+
 export type SettingType = "text" | "number" | "folder" | "choice" | "toggle";
 
 export interface SettingDef {
@@ -80,17 +125,21 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
         const row = document.createElement("div");
         row.className = "settings-editor-row";
 
-        // Toggle: an on/off switch (the app's sliding-checkbox style). Value is
-        // persisted as "on"/"off" so the rest of the settings plumbing (string
-        // values) is unchanged.
+        // Toggle: a purpose-built switch (button role=switch) — NOT a native
+        // checkbox, so the WebView can't paint the tiny default box over our
+        // track. Value persisted as "on"/"off". A live state hint to the right
+        // reflects the current state (replacing a static desc that misleads).
         if (def.type === "toggle") {
-            const cb = document.createElement("input");
-            cb.type = "checkbox";
-            cb.checked = current(def) === "on";
-            cb.setAttribute("role", "switch");
-            cb.setAttribute("aria-label", t(`settings.${def.key}.label`, def.key));
+            const sw = createSwitch(current(def) === "on", t(`settings.${def.key}.label`, def.key));
+            const stateHint = document.createElement("span");
+            stateHint.className = "switch-state";
+            const paintHint = () => {
+                const key = `settings.${def.key}.${sw.checked ? "stateOn" : "stateOff"}`;
+                stateHint.textContent = t(key, sw.checked ? "On" : "Off");
+            };
+            paintHint();
             const commitToggle = async () => {
-                const value = cb.checked ? "on" : "off";
+                const value = sw.checked ? "on" : "off";
                 try {
                     if (def.persist) {
                         await def.persist(value);
@@ -102,16 +151,13 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
                     opts.onChanged?.(def.key, value);
                 } catch (err) {
                     opts.onError?.(String((err as Error)?.message ?? err));
-                    cb.checked = !cb.checked; // revert on failure
+                    sw.checked = !sw.checked; // revert on failure
                 }
             };
-            cb.addEventListener("change", () => void commitToggle());
-            row.appendChild(cb);
+            sw.addEventListener("change", () => { paintHint(); void commitToggle(); });
+            row.appendChild(sw);
+            row.appendChild(stateHint);
             editor.appendChild(row);
-            const desc = document.createElement("div");
-            desc.className = "settings-desc";
-            desc.textContent = t(`settings.${def.key}.desc`, "");
-            if (desc.textContent) editor.appendChild(desc);
             return;
         }
 

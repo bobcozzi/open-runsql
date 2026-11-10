@@ -5,6 +5,7 @@
 // preserves the stored password; unchecking clears it.
 
 import { t } from "./l10n";
+import { createSwitch } from "./settings";
 import type { ConnectionProfile } from "./types";
 
 export interface ConnectionsPaneOptions {
@@ -93,14 +94,10 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
         o.textContent = t(key, fb);
         inBidi.appendChild(o);
     }
-    const inTls = document.createElement("input");
-    inTls.type = "checkbox";
-    const inSavePw = document.createElement("input");
-    inSavePw.type = "checkbox";
-    const inPreload = document.createElement("input");
-    inPreload.type = "checkbox";
-    const inSaveScript = document.createElement("input");
-    inSaveScript.type = "checkbox";
+    const inTls = createSwitch(false, t("conn.tls", "Secure (TLS)"));
+    const inSavePw = createSwitch(false, t("conn.savePassword", "Save password"));
+    const inPreload = createSwitch(true, t("conn.preloadSpool", "Preload spooled files at connect"));
+    const inSaveScript = createSwitch(true, t("conn.saveScript", "Save SQL/CL script between sessions"));
     const inScript = document.createElement("textarea");
     inScript.className = "settings-input conn-script";
     inScript.spellcheck = false;
@@ -126,6 +123,30 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
         form.appendChild(label);
     }
 
+    // A switch row with a live state hint to the right of the control. The hint
+    // shows onText/offText (or generic On/Off when blank) and updates on change.
+    function switchRow(labelKey: string, fallback: string, sw: HTMLElement, onText: string, offText: string): void {
+        const label = document.createElement("label");
+        label.className = "conn-field";
+        const span = document.createElement("span");
+        span.textContent = t(labelKey, fallback);
+        label.appendChild(span);
+        const wrap = document.createElement("div");
+        wrap.className = "conn-switch-wrap";
+        wrap.appendChild(sw);
+        const hint = document.createElement("span");
+        hint.className = "switch-state";
+        wrap.appendChild(hint);
+        const paintHint = () => {
+            const on = (sw as { checked?: boolean }).checked === true;
+            hint.textContent = on ? (onText || t("switch.on", "On")) : (offText || t("switch.off", "Off"));
+        };
+        paintHint();
+        sw.addEventListener("change", paintHint);
+        label.appendChild(wrap);
+        form.appendChild(label);
+    }
+
     const title = document.createElement("div");
     title.className = "settings-editor-title";
     form.appendChild(title);
@@ -136,10 +157,11 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
     row("conn.schema", "Default schema", inSchema);
     row("conn.naming", "Naming", inNaming);
     row("conn.bidi", "Bidi string type", inBidi);
-    row("conn.tls", "Secure (TLS)", inTls);
-    row("conn.savePassword", "Save password", inSavePw);
-    row("conn.preloadSpool", "Preload spooled files at connect", inPreload);
-    row("conn.saveScript", "Save SQL/CL script between sessions", inSaveScript);
+    // Switches get a live state hint to the right (On/Off or a custom string).
+    switchRow("conn.tls", "Secure (TLS)", inTls, t("conn.tls", "Secure (TLS)"), "");
+    switchRow("conn.savePassword", "Save password", inSavePw, t("conn.savePwOn", "On — stored in the OS credential vault"), t("conn.savePwOff", "Off — not stored"));
+    switchRow("conn.preloadSpool", "Preload spooled files at connect", inPreload, "", "");
+    switchRow("conn.saveScript", "Save SQL/CL script between sessions", inSaveScript, "", "");
     row("conn.script", "SQL/CL script", inScript);
 
     const note = document.createElement("div");

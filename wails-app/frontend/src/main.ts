@@ -25,7 +25,7 @@ import { arrowRecallDirection, InputHistoryStore } from "./inputHistory";
 import { parseCmdXml } from "./clprompter/prompterModel";
 import { showPrompter } from "./clprompter/prompterView";
 import { buildSpooledFileRequest, createSpoolPane, isAfpdsFile, type SpoolFilters } from "./spool";
-import { createSettingsPane, type SettingDef } from "./settings";
+import { createSettingsPane, createSwitch, type SettingDef } from "./settings";
 import { createConnectionsPane } from "./connections";
 import { renderScsBytes, formatOsVersion } from "./scsRender";
 import { formatResultData, unescapeDelimiter, type SaveFormat } from "./resultExport";
@@ -146,6 +146,28 @@ function applyL10nToStaticDom(): void {
     setText("work-tab-settings", t("settings.tab", "Settings"));
 }
 applyL10nToStaticDom();
+
+// Quick Connect switches: TLS + Save password as real switches (button
+// role=switch) with the I/O state glyph and a live state hint. They keep the
+// ids in-tls / in-save-password so all the existing .checked reads work
+// unchanged (SwitchControl exposes `checked`).
+function mountQcSwitch(mountId: string, stateId: string, id: string, aria: string, onText: string, offText: string): void {
+    const mount = document.getElementById(mountId);
+    if (!mount) return;
+    const sw = createSwitch(false, aria);
+    sw.id = id;
+    const hint = document.getElementById(stateId);
+    const paint = () => {
+        if (hint) hint.textContent = sw.checked ? onText : offText;
+    };
+    paint();
+    sw.addEventListener("change", paint);
+    mount.appendChild(sw);
+}
+mountQcSwitch("in-tls-mount", "in-tls-state", "in-tls", t("conn.tls", "Secure (TLS)"),
+    t("switch.on", "On"), t("switch.off", "Off"));
+mountQcSwitch("in-save-password-mount", "in-save-password-state", "in-save-password", t("conn.savePassword", "Save password"),
+    t("conn.savePwOn", "On — stored in the OS credential vault"), t("conn.savePwOff", "Off — not stored"));
 
 // --- Work-area panes (bottom tabs): results, messages, dynamic prompter panes ---
 let activePane = "results";
@@ -272,7 +294,7 @@ const SETTING_DEFS: SettingDef[] = [
     {
         key: "defaultNaming",
         type: "choice",
-        options: [["sql", "SQL naming"], ["system", "System naming"]],
+        options: [["sql", "SQL"], ["system", "SYS"]],
         get: (s) => s.defaultNaming || "sql",
         withValue: (s, v) => ({ ...s, defaultNaming: v as AppSettings["defaultNaming"] }),
         persist: (v) => App()?.SetAppSetting("defaultNaming", v) ?? Promise.resolve(),
@@ -311,6 +333,21 @@ const SETTING_DEFS: SettingDef[] = [
         withValue: (s, v) => ({ ...s, ctrlEnterRun: v === "on" }),
         persist: (v) => App()?.SetAppSetting("ctrlEnterRun", v) ?? Promise.resolve(),
     },
+    {
+        key: "connTabLabel",
+        type: "choice",
+        options: [
+            ["userHost", "user@host"],
+            ["nameHost", "name: host"],
+            ["nameUserHost", "name: user@host"],
+            ["nameUser", "name: user"],
+            ["hostUser", "host: user"],
+            ["name", "name"],
+        ],
+        get: (s) => s.connTabLabel || "userHost",
+        withValue: (s, v) => ({ ...s, connTabLabel: v as AppSettings["connTabLabel"] }),
+        persist: (v) => App()?.SetAppSetting("connTabLabel", v) ?? Promise.resolve(),
+    },
 ];
 {
     const app = App();
@@ -324,6 +361,7 @@ const SETTING_DEFS: SettingDef[] = [
                 spoolDblClickAction = (s.spoolDblClickAction || "view") as SpoolDblClickAction;
                 confirmSpoolDelete = s.confirmSpoolDelete !== false;
                 ctrlEnterRun = s.ctrlEnterRun === true;
+                connTabLabelStyle = s.connTabLabel || "userHost";
                 return s;
             },
             save: (next) => app.SetAppSetting("spoolDownloadDir", next.spoolDownloadDir ?? ""),
@@ -338,6 +376,7 @@ const SETTING_DEFS: SettingDef[] = [
                 else if (key === "spoolMaxRows") appSettingsCache = { ...appSettingsCache, spoolMaxRows: Number(value) || 0 };
                 else if (key === "confirmSpoolDelete") confirmSpoolDelete = value !== "off";
                 else if (key === "ctrlEnterRun") ctrlEnterRun = value === "on";
+                else if (key === "connTabLabel") { connTabLabelStyle = value || "userHost"; renderTabs(); }
             },
         }, SETTING_DEFS);
         host.appendChild(pane.root);
@@ -381,6 +420,8 @@ let preloadSpoolList = true;
 // Ctrl+Enter (Cmd+Enter on Mac) runs the current statement. ACS has no such
 // shortcut, so it's opt-in (default OFF) via Settings.
 let ctrlEnterRun = false;
+// Connection-tab label format (Settings): userHost | nameHost | nameUserHost | name.
+let connTabLabelStyle = "userHost";
 let appSettingsCache: AppSettings = {};
 function spoolMaxRowsSetting(): number {
     return appSettingsCache.spoolMaxRows ?? 0;
@@ -1217,6 +1258,11 @@ interface ConnectionTab {
     connectionId: string | null;
     cursorId: string | null;
     hasCursor: boolean;
+    // Connected host/user + matched profile name (set at connect). Used for the
+    // tab label format setting and tooltip.
+    host?: string;
+    user?: string;
+    profileName?: string;
     snapshot?: ResultSnapshot;
 }
 
@@ -1271,14 +1317,52 @@ function activeTab(): ConnectionTab | undefined {
     return tabs.find((t) => t.key === activeTabKey);
 }
 
+// Connection-tab hover text. Connected tabs: the saved connection's Name first
+// (matched by user@host), then user@host and the useful profile attributes, one
+// per line. Falls back to Connected/Not connected when there's no profile match.
+function tabTooltip(tab: ConnectionTab): string {
+    if (!tab.connectionId) return t("main.notConnected", "Not connected");
+    const user = tab.user ?? "";
+    const host = tab.host ?? "";
+    const prof = profiles.find((p) =>
+        p.host.toLowerCase() === host.toLowerCase() && p.user.toLowerCase() === user.toLowerCase());
+    const lines: string[] = [];
+    if (prof?.name && prof.name.toLowerCase() !== host.toLowerCase()) lines.push(prof.name);
+    if (user && host) lines.push(`${user}@${host}`);
+    else lines.push(tab.label);
+    if (prof) {
+        if (prof.defaultSchema) lines.push(`${t("conn.schema", "Default schema")}: ${prof.defaultSchema}`);
+        lines.push(`${t("conn.naming", "Naming")}: ${prof.naming === "system" ? "SYS" : "SQL"}`);
+        lines.push(prof.tls ? "TLS: Yes" : "TLS: No");
+        if (prof.bidiStringType) lines.push(`${t("conn.bidi", "Bidi string type")}: ${prof.bidiStringType}`);
+    }
+    lines.push(t("main.connected", "Connected"));
+    return lines.join("\n");
+}
+
+// Tab label text per the connTabLabel setting. Falls back to user@host when a
+// name-based option has no profile name to show.
+function tabLabelText(tab: ConnectionTab): string {
+    const userHost = tab.user && tab.host ? `${tab.user}@${tab.host}` : tab.label;
+    const name = tab.profileName ?? "";
+    switch (connTabLabelStyle) {
+        case "name": return name || userHost;
+        case "nameUser": return name ? `${name}: ${tab.user ?? ""}`.trim() : userHost;
+        case "hostUser": return tab.host ? `${tab.host}: ${tab.user ?? ""}`.trim() : userHost;
+        case "nameHost": return name ? `${name}: ${tab.host ?? ""}`.trim() : userHost;
+        case "nameUserHost": return name ? `${name}: ${userHost}` : userHost;
+        default: return userHost; // "userHost"
+    }
+}
+
 function renderTabs(): void {
     const list = el<HTMLDivElement>("conn-tab-list");
     list.innerHTML = "";
     for (const tab of tabs) {
         const btn = document.createElement("button");
         btn.className = "conn-tab" + (tab.key === activeTabKey ? " active" : "");
-        btn.textContent = tab.label;
-        btn.title = tab.connectionId ? t("main.connected", "Connected") : t("main.notConnected", "Not connected");
+        btn.textContent = tabLabelText(tab);
+        btn.title = tabTooltip(tab);
         btn.addEventListener("click", () => switchTab(tab.key));
         if (tab.connectionId) {
             const detach = document.createElement("span");
@@ -1595,7 +1679,13 @@ function setConnected(info: ConnectResponse): void {
     const tab = activeTab();
     if (!tab) return;
     tab.connectionId = info.connectionId;
-    tab.label = `${info.user}@${info.host}`;
+    tab.host = info.host;
+    tab.user = info.user;
+    // Match the saved profile (for the tab name/tooltip) by host+user.
+    tab.profileName = profiles.find((p) =>
+        p.host.toLowerCase() === info.host.toLowerCase()
+        && p.user.toLowerCase() === info.user.toLowerCase())?.name ?? "";
+    tab.label = tabLabelText(tab);
     tab.cursorId = null;
     tab.hasCursor = false;
     state.cursorId = null;
