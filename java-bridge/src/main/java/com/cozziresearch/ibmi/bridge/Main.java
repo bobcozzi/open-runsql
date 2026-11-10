@@ -424,6 +424,16 @@ public final class Main {
         // service is independent of the JDBC connection. Output-queue-not-found
         // and authority failures propagate to handleLine -> ok:false with the
         // host message text (shown in the frontend Messages pane).
+        //
+        // The NP server streams the list back chunk-by-chunk over a latent
+        // link, so a 15s per-read SoTimeout kills large/slow lists mid-stream
+        // ("Read timed out"). Relax the read timeout for the duration of this
+        // op, then restore the connect-time 15s. getSocketProperties() returns
+        // a COPY, so we must setSocketProperties() to apply it.
+        com.ibm.as400.access.SocketProperties prior = s.clSystem.getSocketProperties();
+        com.ibm.as400.access.SocketProperties relaxed = s.clSystem.getSocketProperties();
+        relaxed.setSoTimeout(300_000); // 5 min per chunk-read while listing
+        s.clSystem.setSocketProperties(relaxed);
         SpooledFileList list = new SpooledFileList(s.clSystem);
         s.activeSpoolList = list;
         s.spoolListCancelled = false;
@@ -508,6 +518,8 @@ public final class Main {
         } finally {
             try { list.close(); } catch (Exception ignored) {}
             s.activeSpoolList = null;
+            // Restore the connect-time read timeout for CL/print ops.
+            try { s.clSystem.setSocketProperties(prior); } catch (Exception ignored) {}
         }
         ObjectNode result = JSON.createObjectNode();
         result.put("kind", "spooledFiles");
