@@ -134,6 +134,13 @@ export interface SpooledFileDataResult {
     format: string;
     bytes: number;
     base64: string;
+    /** format="image": per-page image payloads (base64) + content type, or
+     * errorCode "imageTransformUnavailable" when the host lacks HPT/QWPGIF. */
+    contentType?: string;
+    pages?: string[];
+    pageCount?: number;
+    errorCode?: string;
+    message?: string;
     elapsedMs: number;
 }
 

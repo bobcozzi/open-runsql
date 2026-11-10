@@ -1649,6 +1649,23 @@ select.spool-move-holdfield {
     white-space: pre;
 }
 
+/* Image viewer for *AFPDS page images (host GIF transform). */
+.spool-viewer-images {
+    flex: 1;
+    overflow: auto;
+    padding: 12px;
+    background: var(--bg-alt);
+}
+
+.spool-viewer-page {
+    display: block;
+    max-width: 100%;
+    margin: 0 auto 12px;
+    background: #fff;
+    border: 1px solid var(--border);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
 [hidden] {
     display: none !important;
 }

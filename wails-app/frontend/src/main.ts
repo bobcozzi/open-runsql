@@ -23,7 +23,7 @@ import { splitStatements, statementAt, statementsFrom } from "./statements";
 import { arrowRecallDirection, InputHistoryStore } from "./inputHistory";
 import { parseCmdXml } from "./clprompter/prompterModel";
 import { showPrompter } from "./clprompter/prompterView";
-import { buildSpooledFileRequest, createSpoolPane, type SpoolFilters } from "./spool";
+import { buildSpooledFileRequest, createSpoolPane, isAfpdsFile, type SpoolFilters } from "./spool";
 import { createSettingsPane, type SettingDef } from "./settings";
 import { createConnectionsPane } from "./connections";
 import { renderScsBytes, formatOsVersion } from "./scsRender";
@@ -526,8 +526,13 @@ export function linesToPdfBase64(lines: string[]): string {
 }
 
 /** Text viewer overlay for a spooled file (View / double-click).
- * Multi-select: each file gets its own viewer; overlays open cascaded. */
+ * Multi-select: each file gets its own viewer; overlays open cascaded.
+ * *AFPDS files delegate to the image viewer (host GIF page transform). */
 async function viewSpooledFile(f: SpooledFileInfo, cascadeIndex = 0): Promise<void> {
+    if (isAfpdsFile(f)) {
+        await viewSpooledImageFile(f, cascadeIndex);
+        return;
+    }
     const app = App();
     const target = spoolTarget(f);
     if (!app || !target) return;
@@ -611,6 +616,80 @@ async function viewSpooledFiles(files: SpooledFileInfo[]): Promise<void> {
         await viewSpooledFile(files[i], i);
     }
     els.statusText.textContent = "";
+}
+
+/** Image viewer overlay for *AFPDS spooled files: per-page GIF images from
+ * the bridge's Host Print Transform path (QWPGIF WSCST), stacked and
+ * scrollable. Degrades to a log message when the host lacks the transform. */
+async function viewSpooledImageFile(f: SpooledFileInfo, cascadeIndex = 0): Promise<void> {
+    const app = App();
+    const target = spoolTarget(f);
+    if (!app || !target) return;
+    appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logViewImg", "View {name} as images...").replace("{name}", f.name)}`, "msg-action");
+    setSpoolBusy(f.name);
+    try {
+        const res = await app.GetSpooledFileData({ ...target, format: "image" });
+        if (res.errorCode) {
+            appendLogLine(t("spool.logNoImage", "AFP image view is not available on this system (host print transform missing); use Download Raw"), "msg-error", true);
+            els.statusText.textContent = "";
+            return;
+        }
+        const pages = res.pages ?? [];
+        const contentType = res.contentType || "image/gif";
+        const overlay = document.createElement("div");
+        overlay.className = "spool-viewer-overlay";
+        const box = document.createElement("div");
+        box.className = "spool-viewer";
+        if (cascadeIndex > 0) {
+            box.style.marginLeft = `${Math.min(cascadeIndex * 40, 300)}px`;
+            box.style.marginTop = `${Math.min(cascadeIndex * 30, 180)}px`;
+        }
+        const head = document.createElement("div");
+        head.className = "spool-viewer-head";
+        const title = document.createElement("span");
+        title.className = "spool-viewer-title";
+        title.textContent = `${f.name}  ${f.jobNumber}/${f.jobUser}/${f.jobName}`
+            + `  (${t("spool.imgPages", "{count} page(s)").replace("{count}", String(pages.length))})`;
+        const closeBtn = document.createElement("button");
+        closeBtn.type = "button";
+        closeBtn.className = "btn";
+        closeBtn.textContent = t("spool.close", "Close");
+        const close = () => { overlay.remove(); document.removeEventListener("keydown", onEsc); };
+        closeBtn.addEventListener("click", close);
+        head.appendChild(title);
+        head.appendChild(closeBtn);
+        const imgBox = document.createElement("div");
+        imgBox.className = "spool-viewer-images";
+        pages.forEach((b64) => {
+            const img = document.createElement("img");
+            img.src = `data:${contentType};base64,${b64}`;
+            img.className = "spool-viewer-page";
+            imgBox.appendChild(img);
+        });
+        if (pages.length === 0) {
+            const empty = document.createElement("div");
+            empty.className = "spool-outq-empty";
+            empty.textContent = t("spool.imgEmpty", "No pages returned by the host transform.");
+            imgBox.appendChild(empty);
+        }
+        box.appendChild(head);
+        box.appendChild(imgBox);
+        overlay.appendChild(box);
+        overlay.addEventListener("click", (ev) => { if (ev.target === overlay) close(); });
+        const onEsc = (ev: KeyboardEvent) => {
+            if (ev.key !== "Escape") return;
+            if (overlay !== document.body.lastElementChild) return;
+            close();
+        };
+        document.addEventListener("keydown", onEsc);
+        document.body.appendChild(overlay);
+        els.statusText.textContent = "";
+    } catch (err) {
+        els.statusText.textContent = "";
+        showMessages([], String((err as Error)?.message ?? err));
+    } finally {
+        clearSpoolBusy();
+    }
 }
 
 /** Download the raw spooled bytes (no rendering) to ~/Downloads. Extension by
@@ -949,6 +1028,11 @@ function showSpoolContextMenu(f: SpooledFileInfo, x: number, y: number, selected
         addItem(t("spool.act.dlPdf", "Download as PDF"), () => void downloadSpooledFiles(targets, "pdf"));
         addItem(t("spool.act.dlText", "Download as Text"), () => void downloadSpooledFiles(targets, "text"));
         addItem(t("spool.act.print", "Print locally"), () => void printSpooledFiles(targets));
+    }
+    // *AFPDS is a binary stream, but the host print transform can image it:
+    // offer the page-image viewer alongside Download Raw.
+    if (!allScs && targets.every(isAfpdsFile)) {
+        addItem(t("spool.act.viewImages", "View as images"), () => void viewSpooledFiles(targets));
     }
     addItem(t("spool.act.saveRaw", "Download Raw"), () => void saveRawSpooledFiles(targets));
     sep();

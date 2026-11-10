@@ -22,6 +22,13 @@ export class AppSettings {
         if (/** @type {any} */(false)) {
             /**
              * @member
+             * @type {string | undefined}
+             */
+            this["scriptsDir"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
              * @type {number | undefined}
              */
             this["fetchSize"] = undefined;
@@ -1061,6 +1068,41 @@ export class SpooledFileDataResult {
              */
             this["base64"] = "";
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["contentType"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string[] | undefined}
+             */
+            this["pages"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {number | undefined}
+             */
+            this["pageCount"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["errorCode"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["message"] = undefined;
+        }
         if (!("elapsedMs" in $$source)) {
             /**
              * @member
@@ -1078,7 +1120,11 @@ export class SpooledFileDataResult {
      * @returns {SpooledFileDataResult}
      */
     static createFrom($$source = {}) {
+        const $$createField5_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("pages" in $$parsedSource) {
+            $$parsedSource["pages"] = $$createField5_0($$parsedSource["pages"]);
+        }
         return new SpooledFileDataResult(/** @type {Partial<SpooledFileDataResult>} */($$parsedSource));
     }
 }
@@ -1485,7 +1531,7 @@ export class SpooledFileResult {
      * @returns {SpooledFileResult}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType3;
+        const $$createField1_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("files" in $$parsedSource) {
             $$parsedSource["files"] = $$createField1_0($$parsedSource["files"]);
@@ -1632,9 +1678,9 @@ export class SqlResult {
      * @returns {SqlResult}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType5;
-        const $$createField2_0 = $$createType7;
-        const $$createField6_0 = $$createType9;
+        const $$createField1_0 = $$createType6;
+        const $$createField2_0 = $$createType8;
+        const $$createField6_0 = $$createType10;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
             $$parsedSource["columns"] = $$createField1_0($$parsedSource["columns"]);
@@ -1740,8 +1786,8 @@ export class WorkspaceState {
      * @returns {WorkspaceState}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType5;
-        const $$createField4_0 = $$createType7;
+        const $$createField3_0 = $$createType6;
+        const $$createField4_0 = $$createType8;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
             $$parsedSource["columns"] = $$createField3_0($$parsedSource["columns"]);
@@ -1756,11 +1802,12 @@ export class WorkspaceState {
 // Private type creation functions
 const $$createType0 = OutputQueueInfo.createFrom;
 const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = SpooledFileInfo.createFrom;
-const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = ColumnInfo.createFrom;
-const $$createType5 = $Create.Array($$createType4);
-const $$createType6 = $Create.Array($Create.Any);
-const $$createType7 = $Create.Array($$createType6);
-const $$createType8 = SqlMessage.createFrom;
-const $$createType9 = $Create.Array($$createType8);
+const $$createType2 = $Create.Array($Create.Any);
+const $$createType3 = SpooledFileInfo.createFrom;
+const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = ColumnInfo.createFrom;
+const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = $Create.Array($Create.Any);
+const $$createType8 = $Create.Array($$createType7);
+const $$createType9 = SqlMessage.createFrom;
+const $$createType10 = $Create.Array($$createType9);

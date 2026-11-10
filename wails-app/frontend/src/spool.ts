@@ -73,6 +73,12 @@ const NUMERIC_KEYS = new Set<SpoolSortKey>(
     SPOOL_COLUMNS.filter((c) => c.numeric).map((c) => c.key),
 );
 
+/** *AFPDS stream: binary AFP records, not SCS-text-renderable. Viewed as
+ * per-page GIF images from the host print transform (QWPGIF WSCST). */
+export function isAfpdsFile(f: SpooledFileInfo): boolean {
+    return (f.deviceType ?? "").toUpperCase().trim() === "*AFPDS";
+}
+
 /** Display text for a cell. Composite columns: outq = LIB/NAME, created =
  * date + time (already ISO from the bridge). */
 export function spoolCellText(f: SpooledFileInfo, key: SpoolSortKey): string {

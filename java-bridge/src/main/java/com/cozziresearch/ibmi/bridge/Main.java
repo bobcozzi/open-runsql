@@ -673,6 +673,47 @@ public final class Main {
                     + " job=" + f.getJobNumber() + "/" + f.getJobUser() + "/" + f.getJobName()
                     + " status=" + safeAttr(f, PrintObject.ATTR_SPLFSTATUS)
                     + " devType=" + dt + " format=" + format);
+            if ("image".equalsIgnoreCase(format)) {
+                // Per-page GIF images via Host Print Transform with the
+                // IBM-supplied GIF workstation customization object. Needs
+                // HPT + QWPGIF on the host (base OS print services); when the
+                // transform can't open, return a structured
+                // imageTransformUnavailable so the frontend degrades to
+                // raw-only instead of showing an error.
+                ObjectNode imageResult = JSON.createObjectNode();
+                imageResult.put("kind", "spooledFileData");
+                imageResult.put("format", format);
+                try {
+                    PrintParameterList p = new PrintParameterList();
+                    p.setParameter(PrintObject.ATTR_MFGTYPE, "*WSCST");
+                    p.setParameter(PrintObject.ATTR_WORKSTATION_CUST_OBJECT, "/QSYS.LIB/QWPGIF.WSCST");
+                    ArrayNode pages = JSON.createArrayNode();
+                    long total = 0;
+                    try (PrintObjectPageInputStream in = f.getPageInputStream(p)) {
+                        byte[] buf = new byte[65536];
+                        int n;
+                        do {
+                            java.io.ByteArrayOutputStream pageBytes = new java.io.ByteArrayOutputStream();
+                            while ((n = in.read(buf)) > 0) pageBytes.write(buf, 0, n);
+                            total += pageBytes.size();
+                            pages.add(Base64.getEncoder().encodeToString(pageBytes.toByteArray()));
+                        } while (in.nextPage());
+                    }
+                    imageResult.put("contentType", "image/gif");
+                    imageResult.set("pages", pages);
+                    imageResult.put("pageCount", pages.size());
+                    imageResult.put("bytes", total);
+                } catch (com.ibm.as400.access.AS400Exception e) {
+                    // Covers ErrorCompletingRequestException and
+                    // RequestNotSupportedException as well — both subclass
+                    // AS400Exception in JT400.
+                    System.err.println("[spool] image transform unavailable for " + name + ": " + e);
+                    imageResult.put("errorCode", "imageTransformUnavailable");
+                    imageResult.put("message", nullToEmpty(e.getMessage()));
+                }
+                imageResult.put("elapsedMs", elapsedMs(started));
+                return imageResult;
+            }
             if ("*USERASCII".equalsIgnoreCase(dt) || "*AFPDS".equalsIgnoreCase(dt)) {
                 // No-arg getInputStream(): an empty PrintParameterList still
                 // alters the NP-server open request.

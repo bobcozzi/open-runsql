@@ -227,11 +227,16 @@ type SpooledFileActionResult struct {
 }
 
 type SpooledFileDataResult struct {
-	Kind      string `json:"kind"`
-	Format    string `json:"format"`
-	Bytes     int64  `json:"bytes"`
-	Base64    string `json:"base64"`
-	ElapsedMs int64  `json:"elapsedMs"`
+	Kind        string   `json:"kind"`
+	Format      string   `json:"format"`
+	Bytes       int64    `json:"bytes"`
+	Base64      string   `json:"base64"`
+	ContentType string   `json:"contentType,omitempty"`
+	Pages       []string `json:"pages,omitempty"`
+	PageCount   int64    `json:"pageCount,omitempty"`
+	ErrorCode   string   `json:"errorCode,omitempty"`
+	Message     string   `json:"message,omitempty"`
+	ElapsedMs   int64    `json:"elapsedMs"`
 }
 
 // ConnectionProfile is a saved connection. Password is stored base64-obscured
@@ -1279,9 +1284,19 @@ func (a *App) GetSpooledFileData(req SpooledFileDataRequest) (*SpooledFileDataRe
 		return nil, err
 	}
 	raw, _ := resp["result"].(map[string]any)
+	pages := []string{}
+	if arr, ok := raw["pages"].([]any); ok {
+		for _, v := range arr {
+			if s, ok := v.(string); ok {
+				pages = append(pages, s)
+			}
+		}
+	}
 	return &SpooledFileDataResult{
 		Kind: str2(raw, "kind"), Format: str2(raw, "format"), Bytes: int64Val(raw["bytes"]),
-		Base64: str2(raw, "base64"), ElapsedMs: int64Val(raw["elapsedMs"]),
+		Base64: str2(raw, "base64"), ContentType: str2(raw, "contentType"), Pages: pages,
+		PageCount: int64Val(raw["pageCount"]), ErrorCode: str2(raw, "errorCode"),
+		Message: str2(raw, "message"), ElapsedMs: int64Val(raw["elapsedMs"]),
 	}, nil
 }
 
