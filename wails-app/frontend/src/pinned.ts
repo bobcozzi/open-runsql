@@ -17,6 +17,7 @@ interface PinnedPayload {
     label: string;
     columns: ColumnInfo[];
     rows: unknown[][];
+    sql?: string;
 }
 
 function el<T extends HTMLElement>(id: string): T {
@@ -41,7 +42,7 @@ function el<T extends HTMLElement>(id: string): T {
 
 function decodePayload(): PinnedPayload {
     const raw = new URLSearchParams(window.location.search).get("data") ?? "";
-    if (!raw) return { label: "Pinned result", columns: [], rows: [] };
+    if (!raw) return { label: "Pinned result", columns: [], rows: [], sql: "" };
     try {
         const json = decodeURIComponent(escape(atob(raw)));
         const p = JSON.parse(json) as PinnedPayload;
@@ -49,9 +50,10 @@ function decodePayload(): PinnedPayload {
             label: p.label ?? "Pinned result",
             columns: p.columns ?? [],
             rows: p.rows ?? [],
+            sql: p.sql ?? "",
         };
     } catch {
-        return { label: "Pinned result", columns: [], rows: [] };
+        return { label: "Pinned result", columns: [], rows: [], sql: "" };
     }
 }
 
@@ -146,6 +148,23 @@ el<HTMLSpanElement>("pinned-title").textContent = payload.label;
 document.title = payload.label;
 el<HTMLSpanElement>("pinned-count").textContent =
     `${payload.rows.length} ${payload.rows.length === 1 ? "row" : "rows"}`;
+
+// Show the producing SQL (read-only) + a copy-icon button when we have it.
+const sqlBox = el<HTMLTextAreaElement>("pinned-sql");
+const btnCopySql = el<HTMLButtonElement>("btn-pinned-copy-sql");
+if (payload.sql && payload.sql.trim()) {
+    sqlBox.value = payload.sql;
+    sqlBox.hidden = false;
+    btnCopySql.hidden = false;
+    // Auto-size to a few lines without a scrollbar until it gets long.
+    sqlBox.rows = Math.min(4, Math.max(1, payload.sql.split("\n").length));
+    btnCopySql.addEventListener("click", () => {
+        navigator.clipboard.writeText(payload.sql ?? "").then(() => {
+            btnCopySql.textContent = "✓";
+            setTimeout(() => { btnCopySql.textContent = "⧉"; }, 1200);
+        }).catch(() => { sqlBox.select(); document.execCommand("copy"); });
+    });
+}
 
 // Delimiter override applies to CSV only (TAB/JSON/Markdown have fixed layouts).
 const inDelim = el<HTMLInputElement>("in-pinned-delim");

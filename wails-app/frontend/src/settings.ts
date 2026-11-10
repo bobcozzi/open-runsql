@@ -6,7 +6,7 @@
 import { t } from "./l10n";
 import type { AppSettings } from "./types";
 
-export type SettingType = "text" | "number" | "folder" | "choice";
+export type SettingType = "text" | "number" | "folder" | "choice" | "toggle";
 
 export interface SettingDef {
     /** Stable key; also the l10n suffix (settings.<key>.label / .desc). */
@@ -79,6 +79,41 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
 
         const row = document.createElement("div");
         row.className = "settings-editor-row";
+
+        // Toggle: an on/off switch (the app's sliding-checkbox style). Value is
+        // persisted as "on"/"off" so the rest of the settings plumbing (string
+        // values) is unchanged.
+        if (def.type === "toggle") {
+            const cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.checked = current(def) === "on";
+            cb.setAttribute("role", "switch");
+            cb.setAttribute("aria-label", t(`settings.${def.key}.label`, def.key));
+            const commitToggle = async () => {
+                const value = cb.checked ? "on" : "off";
+                try {
+                    if (def.persist) {
+                        await def.persist(value);
+                    } else {
+                        await opts.save(def.withValue({ ...settings }, value));
+                    }
+                    settings = def.withValue({ ...settings }, value);
+                    opts.onSaved?.();
+                    opts.onChanged?.(def.key, value);
+                } catch (err) {
+                    opts.onError?.(String((err as Error)?.message ?? err));
+                    cb.checked = !cb.checked; // revert on failure
+                }
+            };
+            cb.addEventListener("change", () => void commitToggle());
+            row.appendChild(cb);
+            editor.appendChild(row);
+            const desc = document.createElement("div");
+            desc.className = "settings-desc";
+            desc.textContent = t(`settings.${def.key}.desc`, "");
+            if (desc.textContent) editor.appendChild(desc);
+            return;
+        }
 
         const input: HTMLInputElement | HTMLSelectElement = def.type === "choice"
             ? document.createElement("select")

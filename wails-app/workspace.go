@@ -11,6 +11,8 @@ type PinnedResult struct {
 	Label   string       `json:"label"`
 	Columns []ColumnInfo `json:"columns"`
 	Rows    [][]any      `json:"rows"`
+	// SQL is the statement that produced the set (shown in the pop-out window).
+	SQL string `json:"sql,omitempty"`
 }
 
 // WorkspaceState is the per-connection workspace, owned by Go so that any

@@ -1160,6 +1160,31 @@ keep keyboard * focus-visible for accessibility. */ .result-subtab-closeall:focu
 .pinned-title {
     font-weight: 600;
     font-size: 13px;
+    white-space: nowrap;
+}
+
+/* Read-only SQL statement in the pop-out header: scrollable, monospace, at
+ * most a few lines tall so it never crowds the grid. */
+.pinned-sql {
+    flex: 1;
+    min-width: 0;
+    resize: none;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: var(--fg-dim);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 6px;
+    line-height: 1.3;
+    overflow: auto;
+    max-height: 4.5em;
+}
+
+.pinned-copy {
+    flex: 0 0 auto;
+    font-size: 12px;
+    padding: 3px 8px;
 }
 
 .pinned-count {

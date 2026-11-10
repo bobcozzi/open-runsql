@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitStatements, statementAt, statementsFrom } from "../src/statements";
+import { splitStatements, statementAt, statementsFrom, isStopStatement } from "../src/statements";
 
 describe("splitStatements", () => {
     it("splits on top-level semicolons", () => {
@@ -27,6 +27,30 @@ describe("splitStatements", () => {
 
     it("no trailing empty statement", () => {
         expect(splitStatements("SELECT 1 FROM SYSIBM.SYSDUMMY1;")).toHaveLength(1);
+    });
+});
+
+describe("isStopStatement", () => {
+    it("matches STOP and STOP; case-insensitively", () => {
+        expect(isStopStatement("STOP")).toBe(true);
+        expect(isStopStatement("stop")).toBe(true);
+        expect(isStopStatement("STOP;")).toBe(true);
+        expect(isStopStatement("  stop ;  ")).toBe(true);
+        expect(isStopStatement("Stop")).toBe(true);
+    });
+
+    it("splitStatements yields STOP for both bare forms", () => {
+        const src = "SELECT 1 FROM SYSIBM.SYSDUMMY1;\nSTOP;\nSELECT 2 FROM SYSIBM.SYSDUMMY1";
+        const texts = splitStatements(src).map((s) => s.text);
+        expect(texts).toHaveLength(3);
+        expect(isStopStatement(texts[1])).toBe(true);
+    });
+
+    it("does not match STOP inside another statement or with extra text", () => {
+        expect(isStopStatement("STOPPED")).toBe(false);
+        expect(isStopStatement("SELECT 1")).toBe(false);
+        expect(isStopStatement("STOP NOW")).toBe(false);
+        expect(isStopStatement("")).toBe(false);
     });
 });
 

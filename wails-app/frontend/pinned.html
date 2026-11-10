@@ -11,6 +11,10 @@
 <body class="pinned-window">
     <header class="pinned-head">
         <span id="pinned-title" class="pinned-title">Pinned result</span>
+        <textarea id="pinned-sql" class="pinned-sql" readonly rows="1"
+            title="The SQL statement that produced this result" hidden></textarea>
+        <button id="btn-pinned-copy-sql" class="btn icon-btn pinned-copy" type="button" title="Copy the SQL statement"
+            hidden>⧉</button>
         <span class="spacer"></span>
         <span id="pinned-count" class="pinned-count"></span>
         <select id="sel-pinned-format" class="pinned-format" title="Format">

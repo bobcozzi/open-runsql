@@ -849,6 +849,14 @@ export class PinnedResult {
              */
             this["rows"] = [];
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * SQL is the statement that produced the set (shown in the pop-out window).
+             * @member
+             * @type {string | undefined}
+             */
+            this["sql"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }

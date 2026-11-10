@@ -41,6 +41,8 @@ export interface PinnedResult {
     label: string;
     columns: ColumnInfo[];
     rows: unknown[][];
+    /** The SQL statement that produced the set (shown in the pop-out window). */
+    sql?: string;
 }
 
 export interface CLMessage {
@@ -192,6 +194,7 @@ export interface AppSettings {
     defaultNaming?: "" | "sql" | "system"; // "" = sql
     spoolMaxRows?: number; // 0/undefined = unlimited
     confirmSpoolDelete?: boolean; // undefined = on
+    ctrlEnterRun?: boolean; // undefined/false = off (Ctrl/Cmd+Enter runs current statement)
 }
 
 // Wails v3: the App service is exposed via generated bindings

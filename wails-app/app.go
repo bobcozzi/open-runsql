@@ -386,6 +386,9 @@ type AppSettings struct {
 	DefaultNaming       string `json:"defaultNaming,omitempty"`       // sql | system ("" = sql)
 	SpoolMaxRows        int    `json:"spoolMaxRows,omitempty"`        // 0 = unlimited
 	ConfirmSpoolDelete  *bool  `json:"confirmSpoolDelete,omitempty"`  // nil = on
+	// CtrlEnterRun gates the Ctrl/Cmd+Enter "run current statement" shortcut
+	// (ACS has no such key, so it's opt-in). nil/false = off.
+	CtrlEnterRun *bool `json:"ctrlEnterRun,omitempty"`
 }
 
 func settingsStorePath() string {
@@ -480,6 +483,9 @@ func (a *App) SetAppSetting(key, value string) error {
 			return fmt.Errorf("spool row cap must be 0-100000 (0 = unlimited)")
 		}
 		s.SpoolMaxRows = n
+	case "ctrlEnterRun":
+		on := strings.EqualFold(strings.TrimSpace(value), "on") || value == "true"
+		s.CtrlEnterRun = &on
 	case "confirmSpoolDelete":
 		on := strings.EqualFold(strings.TrimSpace(value), "on") || value == "true"
 		s.ConfirmSpoolDelete = &on
@@ -1109,7 +1115,7 @@ func (a *App) OpenPinnedWindow(connectionID, pinID, title string) error {
 	}
 	// Encode the snapshot so the window renders standalone (no connection).
 	payload, err := json.Marshal(map[string]any{
-		"label": label, "columns": snap.Columns, "rows": snap.Rows,
+		"label": label, "columns": snap.Columns, "rows": snap.Rows, "sql": snap.SQL,
 	})
 	if err != nil {
 		return err

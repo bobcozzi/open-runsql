@@ -113,3 +113,10 @@ export function statementsFrom(source: string, pos: number): StatementSpan[] {
     if (idx < 0) return [];
     return spans.slice(idx);
 }
+
+/** True when a statement span is a bare STOP (STOP or STOP;, only thing on the
+ * line) — ACS RUNSQL parity: Run All / Run from Selected end at STOP. Works on
+ * a splitStatements span (whose text excludes the trailing ';') or raw text. */
+export function isStopStatement(text: string): boolean {
+    return /^stop\s*;?$/i.test(text.trim());
+}

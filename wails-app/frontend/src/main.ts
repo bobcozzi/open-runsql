@@ -20,7 +20,7 @@ import {
     type SqlMessage,
     type SqlResult,
 } from "./types";
-import { splitStatements, statementAt, statementsFrom } from "./statements";
+import { splitStatements, statementAt, statementsFrom, isStopStatement } from "./statements";
 import { arrowRecallDirection, InputHistoryStore } from "./inputHistory";
 import { parseCmdXml } from "./clprompter/prompterModel";
 import { showPrompter } from "./clprompter/prompterView";
@@ -127,8 +127,9 @@ function applyL10nToStaticDom(): void {
     setPlaceholder("in-schema", t("html.schemaPlaceholder", "(optional)"));
     setTitle("btn-saved-hosts", t("main.savedConnections", "Quick Connect: saved connections"));
     setTitle("btn-run", t("html.runTitle", "Run Selected (statement at cursor; Cmd/Ctrl+Enter)"));
-    setTitle("btn-run-all", t("html.runAllTitle", "Run All (every statement, first to last)"));
-    setTitle("btn-run-from", t("html.runFromTitle", "Run from Selected (cursor statement through the last)"));
+    // 2nd button now runs from selected to end; 3rd runs all.
+    setTitle("btn-run-all", t("html.runFromTitle", "Run from Selected (cursor statement through the last)"));
+    setTitle("btn-run-from", t("html.runAllTitle", "Run All (every statement, first to last)"));
     setText("btn-cancel", t("main.cancel", "Cancel"));
     setTitle("btn-cancel", t("html.cancelTitle", "Cancel running statement"));
     setText("btn-prompt", t("main.prompt", "Prompt"));
@@ -298,11 +299,17 @@ const SETTING_DEFS: SettingDef[] = [
     },
     {
         key: "confirmSpoolDelete",
-        type: "choice",
-        options: [["on", "On"], ["off", "Off"]],
+        type: "toggle",
         get: (s) => (s.confirmSpoolDelete === false ? "off" : "on"),
         withValue: (s, v) => ({ ...s, confirmSpoolDelete: v !== "off" }),
         persist: (v) => App()?.SetAppSetting("confirmSpoolDelete", v) ?? Promise.resolve(),
+    },
+    {
+        key: "ctrlEnterRun",
+        type: "toggle",
+        get: (s) => (s.ctrlEnterRun ? "on" : "off"),
+        withValue: (s, v) => ({ ...s, ctrlEnterRun: v === "on" }),
+        persist: (v) => App()?.SetAppSetting("ctrlEnterRun", v) ?? Promise.resolve(),
     },
 ];
 {
@@ -316,6 +323,7 @@ const SETTING_DEFS: SettingDef[] = [
                 if (s.fetchSize) state.fetchSize = s.fetchSize;
                 spoolDblClickAction = (s.spoolDblClickAction || "view") as SpoolDblClickAction;
                 confirmSpoolDelete = s.confirmSpoolDelete !== false;
+                ctrlEnterRun = s.ctrlEnterRun === true;
                 return s;
             },
             save: (next) => app.SetAppSetting("spoolDownloadDir", next.spoolDownloadDir ?? ""),
@@ -329,6 +337,7 @@ const SETTING_DEFS: SettingDef[] = [
                 else if (key === "resultsFontSize") applyResultsFontSize(Number(value) || 12);
                 else if (key === "spoolMaxRows") appSettingsCache = { ...appSettingsCache, spoolMaxRows: Number(value) || 0 };
                 else if (key === "confirmSpoolDelete") confirmSpoolDelete = value !== "off";
+                else if (key === "ctrlEnterRun") ctrlEnterRun = value === "on";
             },
         }, SETTING_DEFS);
         host.appendChild(pane.root);
@@ -369,6 +378,9 @@ async function spoolDblClick(f: SpooledFileInfo): Promise<void> {
 /** Settings-backed toggles applied across the UI. */
 let confirmSpoolDelete = true;
 let preloadSpoolList = true;
+// Ctrl+Enter (Cmd+Enter on Mac) runs the current statement. ACS has no such
+// shortcut, so it's opt-in (default OFF) via Settings.
+let ctrlEnterRun = false;
 let appSettingsCache: AppSettings = {};
 function spoolMaxRowsSetting(): number {
     return appSettingsCache.spoolMaxRows ?? 0;
@@ -1227,6 +1239,9 @@ let pinnedResults: PinnedResult[] = [];
 let activePinnedId = ""; // "" = Latest (the live result)
 let pinnedSeq = 0;
 const PIN_LABEL_MAX = 32;
+// The SQL text that produced the current live result (set in runOne). Pinned
+// snapshots carry it so the pop-out window can show/copy the statement.
+let lastResultSql = "";
 // Pins currently popped out into their own window: hidden from the subtab
 // strip (the window holds the data) but kept here so they restore on close.
 const poppedOutPins = new Set<string>();
@@ -2016,6 +2031,7 @@ function pinCurrentResult(): void {
         label,
         columns: state.columns.map((c) => ({ ...c })),
         rows: state.rows.map((r) => [...r]),
+        sql: lastResultSql || undefined,
     });
     activePinnedId = pinnedResults[pinnedResults.length - 1].id;
     renderResultSubtabs();
@@ -2424,6 +2440,8 @@ async function runOne(text: string, actionLabel = t("main.logRunSelected", "Run 
             // columns+rows together (previously rows landed after the render,
             // producing a one-frame "cleared" flash when a pinned tab had focus).
             state.rows = sqlResult.kind === "rows" ? sqlResult.rows ?? [] : [];
+            // Record the statement that produced this result for pinning.
+            lastResultSql = sqlResult.kind === "rows" ? text : "";
             showSqlResult(sqlResult);
         }
     } catch (err) {
@@ -2470,6 +2488,27 @@ async function doRun(): Promise<void> {
 }
 
 // Run All: every statement in order; stops on first failure.
+// A bare STOP statement (STOP or STOP;, the only thing on its line) ends the
+// batch — ACS RUNSQL parity.
+function logStop(): void {
+    appendLogLine(`[ ${nowStamp()} ]  ${t("main.logStop", "STOP encountered — ending the run.")}`, "msg-info");
+}
+
+// Move the editor caret to a statement's start offset so it tracks the running
+// statement (and lands on the STOP line when a batch halts there). Does NOT
+// steal focus — Run buttons keep working. Scrolls the caret's line into view.
+function setCaretToOffset(offset: number): void {
+    const ta = els.sqlInput;
+    ta.setSelectionRange(offset, offset);
+    // Scroll the caret's line into view without focusing the textarea.
+    const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 18;
+    const line = ta.value.slice(0, offset).split("\n").length - 1;
+    const targetTop = line * lineHeight;
+    if (targetTop < ta.scrollTop || targetTop > ta.scrollTop + ta.clientHeight - lineHeight) {
+        ta.scrollTop = Math.max(0, targetTop - ta.clientHeight / 2);
+    }
+}
+
 async function doRunAll(): Promise<void> {
     if (!activeTab()?.connectionId || state.running) return;
     const stmts = splitStatements(els.sqlInput.value);
@@ -2479,6 +2518,12 @@ async function doRunAll(): Promise<void> {
     els.statusText.textContent = t("main.runningStatements", "Running {count} statements...").replace("{count}", String(stmts.length));
     try {
         for (let i = 0; i < stmts.length; i += 1) {
+            setCaretToOffset(stmts[i].start);
+            if (isStopStatement(stmts[i].text)) {
+                logStop();
+                els.statusText.textContent = t("main.stoppedAt", "Stopped at STOP (statement {current} of {total}).").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
+                return;
+            }
             els.statusText.textContent = t("main.runningStatementOf", "Running statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
             await runOne(stmts[i].text, t("main.logRunAllStatement", "Run All — statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length)));
         }
@@ -2502,6 +2547,12 @@ async function doRunFromSelected(): Promise<void> {
     els.statusText.textContent = t("main.runningStatementsFromCursor", "Running {count} statements from cursor...").replace("{count}", String(stmts.length));
     try {
         for (let i = 0; i < stmts.length; i += 1) {
+            setCaretToOffset(stmts[i].start);
+            if (isStopStatement(stmts[i].text)) {
+                logStop();
+                els.statusText.textContent = t("main.stoppedAt", "Stopped at STOP (statement {current} of {total}).").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
+                return;
+            }
             els.statusText.textContent = t("main.runningStatementOf", "Running statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
             await runOne(stmts[i].text, t("main.logRunFromStatement", "Run from Selected — statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length)));
         }
@@ -2683,8 +2734,10 @@ els.btnConnect.addEventListener("click", () => void doConnect());
 els.btnDisconnect.addEventListener("click", () => void doDisconnect());
 document.getElementById("btn-go")?.addEventListener("click", () => void doConnect());
 els.btnRun.addEventListener("click", () => void doRun());
-els.btnRunAll.addEventListener("click", () => void doRunAll());
-els.btnRunFrom.addEventListener("click", () => void doRunFromSelected());
+// Order/sequence: Run Selected, Run-from-Selected-to-end, Run All. The 2nd and
+// 3rd buttons keep their icons but the actions are swapped to match that order.
+els.btnRunAll.addEventListener("click", () => void doRunFromSelected());
+els.btnRunFrom.addEventListener("click", () => void doRunAll());
 els.btnCancel.addEventListener("click", () => void doCancel());
 els.btnPrompt.addEventListener("click", () => void doPrompt());
 el<HTMLButtonElement>("btn-new-conn").addEventListener("click", () => addTab());
@@ -2710,10 +2763,32 @@ async function openHistoryPicker(): Promise<void> {
         onInsert: (text) => {
             const ta = els.sqlInput;
             const stmt = /;\s*$/.test(text) ? text : `${text};`;
-            const start = ta.selectionStart ?? ta.value.length;
-            const end = ta.selectionEnd ?? start;
-            ta.value = ta.value.slice(0, start) + stmt + ta.value.slice(end);
-            const caret = start + stmt.length;
+            const pos = ta.selectionStart ?? 0;
+            // Insert at a statement boundary, never mid-token:
+            //  - caret at 0 (or empty input) -> insert at the very start.
+            //  - caret inside a statement -> insert right after that
+            //    statement's end (its semicolon / end of the span).
+            //  - caret not on a statement -> append at the end of input.
+            let insertAt: number;
+            if (pos === 0 || ta.value.trim() === "") {
+                insertAt = 0;
+            } else {
+                const cur = statementAt(ta.value, pos);
+                // StatementSpan.end is the offset OF the terminating ';' (not
+                // after it), so step past a trailing semicolon to land after it.
+                insertAt = cur ? (ta.value[cur.end] === ";" ? cur.end + 1 : cur.end) : ta.value.length;
+            }
+            // Keep statements separated: newline before/after as needed.
+            const before = ta.value.slice(0, insertAt);
+            const after = ta.value.slice(insertAt);
+            const needLeadNl = insertAt > 0 && !/[\r\n]$/.test(before);
+            const needTrailNl = after.trim() !== "" && !/^[\r\n]/.test(after);
+            const insertText = (needLeadNl ? "\n" : "") + stmt + (needTrailNl ? "\n" : "");
+            ta.value = before + insertText + after;
+            // Caret goes to the START of the inserted statement so Run/Run
+            // Selected immediately finds it (a caret after the trailing ';'
+            // belongs to no statement).
+            const caret = insertAt + (needLeadNl ? 1 : 0);
             ta.focus();
             ta.setSelectionRange(caret, caret);
             pushWorkspaceState();
@@ -2861,7 +2936,9 @@ function handleHistoryKeydown(ev: KeyboardEvent): void {
         }).catch(() => { /* no history */ });
         return;
     }
-    if (!history.hasHistory) return;
+    // Ctrl+Enter (Cmd+Enter on Mac) runs the current statement — opt-in via
+    // Settings (ctrlEnterRun, default off; ACS has no such shortcut).
+    if (ctrlEnterRun && !history.hasHistory) return;
     const recalled = direction === "prev" ? history.prev(els.sqlInput.value) : history.next();
     if (recalled === undefined) return;
     ev.preventDefault();
