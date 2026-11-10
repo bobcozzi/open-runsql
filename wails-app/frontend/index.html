@@ -103,8 +103,23 @@
                 <button id="btn-cancel" class="btn" disabled title="Cancel running statement">Cancel</button>
                 <button id="btn-prompt" class="btn" disabled title="Prompt CL command (F4)">Prompt</button>
                 <button id="btn-history" class="btn" type="button" title="Statement history (F6)">History</button>
-                <button id="btn-script-file" class="btn" type="button"
-                    title="Save or open the editor as a .sql file">File...</button>
+                <button id="btn-script-open" class="btn icon-btn" type="button"
+                    title="Open a .sql script into the editor (Ctrl/Cmd+O)">
+                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                        <path d="M1.5 3.5v9h13v-7h-6.5L6.5 3.5h-5z" fill="none" stroke="currentColor" stroke-width="1.2"
+                            stroke-linejoin="round" />
+                        <path d="M1.5 5.5h6l1.5 2h5.5" fill="none" stroke="currentColor" stroke-width="1.2" />
+                    </svg>
+                </button>
+                <button id="btn-script-save" class="btn icon-btn" type="button"
+                    title="Save the editor as a .sql file (Ctrl/Cmd+S)">
+                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                        <path d="M2.5 2.5h9l2 2v9h-11v-11z" fill="none" stroke="currentColor" stroke-width="1.2"
+                            stroke-linejoin="round" />
+                        <path d="M5 2.5v3h5v-3" fill="none" stroke="currentColor" stroke-width="1.2" />
+                        <rect x="5" y="9.5" width="6" height="4" fill="none" stroke="currentColor" stroke-width="1.2" />
+                    </svg>
+                </button>
             </span>
             <span class="hint">SQL &mdash; or prefix with <code>CL:</code> for IBM i commands (e.g.
                 <code>CL: WRKSYSSTS OUTPUT(*PRINT)</code>)</span>

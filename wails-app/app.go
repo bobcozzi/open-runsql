@@ -363,6 +363,7 @@ func profileStorePath() string {
 
 type AppSettings struct {
 	SpoolDownloadDir    string `json:"spoolDownloadDir,omitempty"`
+	ScriptsDir          string `json:"scriptsDir,omitempty"`
 	FetchSize           int    `json:"fetchSize,omitempty"`
 	AutoOpenDownloads   *bool  `json:"autoOpenDownloads,omitempty"`   // legacy; superseded by SpoolDblClickAction
 	SpoolDblClickAction string `json:"spoolDblClickAction,omitempty"` // view | dlPdf | dlText | print ("" = view)
@@ -422,6 +423,18 @@ func (a *App) SetAppSetting(key, value string) error {
 			}
 		}
 		s.SpoolDownloadDir = d
+	case "scriptsDir":
+		d := strings.TrimSpace(value)
+		if d != "" {
+			info, err := os.Stat(d)
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() {
+				return fmt.Errorf("not a directory: %s", d)
+			}
+		}
+		s.ScriptsDir = d
 	case "fetchSize":
 		n, err := strconv.Atoi(strings.TrimSpace(value))
 		if err != nil || n < 10 || n > 10000 {
@@ -494,6 +507,16 @@ func spoolDownloadDir() string {
 		return d
 	}
 	return defaultDownloadsDir()
+}
+
+// scriptsDir resolves the default folder for .sql script Open/Save As dialogs.
+// Falls back to the spool download dir when unset so behavior is unchanged
+// for anyone who never configures it.
+func scriptsDir() string {
+	if d := strings.TrimSpace(loadAppSettings().ScriptsDir); d != "" {
+		return d
+	}
+	return spoolDownloadDir()
 }
 
 // openInFileManager shows a file or folder in the OS file manager.
@@ -1358,6 +1381,11 @@ func (a *App) SaveFileAs(filename, base64Data, filterLabel, filterPattern string
 		Filename:             filename,
 		Directory:            spoolDownloadDir(),
 	}
+	// .sql scripts honor the separate Scripts folder setting.
+	if filterPattern == "*.sql" {
+		opts.Title = "Save SQL Script As"
+		opts.Directory = scriptsDir()
+	}
 	if filterLabel != "" && filterPattern != "" {
 		opts.Filters = []application.FileFilter{{DisplayName: filterLabel, Pattern: filterPattern}}
 	}
@@ -1382,6 +1410,7 @@ func (a *App) OpenFileAs(filterLabel, filterPattern string) (string, error) {
 		CanChooseFiles:       true,
 		CanChooseDirectories: false,
 		Title:                "Open SQL Script",
+		Directory:            scriptsDir(),
 	}
 	if filterLabel != "" && filterPattern != "" {
 		opts.Filters = []application.FileFilter{{DisplayName: filterLabel, Pattern: filterPattern}}
@@ -1395,7 +1424,8 @@ func (a *App) OpenFileAs(filterLabel, filterPattern string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return string(data), nil
+	// Return path + text so the caller can track the file for Save As prefill.
+	return path + "\n" + string(data), nil
 }
 
 // PrintSpooledFile saves the PDF bytes to a temp file and opens it with the OS

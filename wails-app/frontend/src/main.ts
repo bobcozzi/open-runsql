@@ -130,6 +130,8 @@ function applyL10nToStaticDom(): void {
     setTitle("btn-cancel", t("html.cancelTitle", "Cancel running statement"));
     setText("btn-prompt", t("main.prompt", "Prompt"));
     setTitle("btn-prompt", t("html.promptTitle", "Prompt CL command (F4)"));
+    setTitle("btn-script-open", t("html.openScriptTitle", "Open a .sql script into the editor (Ctrl/Cmd+O)"));
+    setTitle("btn-script-save", t("html.saveScriptTitle", "Save the editor as a .sql file (Ctrl/Cmd+S)"));
     setTitle("splitter", t("html.splitterTitle", "Drag to resize"));
     setText("btn-load-more", t("html.loadMore", "Load more"));
     setText("btn-load-all", t("html.loadAll", "Load all"));
@@ -230,6 +232,15 @@ const SETTING_DEFS: SettingDef[] = [
         get: (s) => s.spoolDownloadDir ?? "",
         withValue: (s, v) => ({ ...s, spoolDownloadDir: v }),
         browse: () => App()?.PickDirectory(t("settings.spoolDownloadDir.browseTitle", "Select download folder")) ?? Promise.resolve(""),
+    },
+    {
+        key: "scriptsDir",
+        type: "folder",
+        placeholder: "~/Downloads (default)",
+        get: (s) => s.scriptsDir ?? "",
+        withValue: (s, v) => ({ ...s, scriptsDir: v }),
+        browse: () => App()?.PickDirectory(t("settings.scriptsDir.browseTitle", "Select scripts folder")) ?? Promise.resolve(""),
+        persist: (v) => App()?.SetAppSetting("scriptsDir", v) ?? Promise.resolve(),
     },
     {
         key: "fetchSize",
@@ -1090,6 +1101,8 @@ interface ResultSnapshot {
     // Work pane the tab was last showing (results/messages/spool/...) —
     // restored on tab switch so e.g. Spooled Files stays put.
     activePane?: string;
+    // Last-opened/saved .sql filename for Save As prefill (per tab).
+    scriptFile?: string;
     // Quick Connect form state (per-tab).
     connForm?: {
         host: string; user: string; password: string; schema: string;
@@ -2339,34 +2352,62 @@ els.sqlInput.addEventListener("blur", () => {
     scriptSaveTimer = setTimeout(() => void persistEditorScript(), 400);
 });
 
-// File... button: save the editor as a .sql file, or open one back in.
-document.getElementById("btn-script-file")?.addEventListener("click", () => {
-    void (async () => {
-        const app = App();
-        if (!app) return;
-        if (els.sqlInput.value.trim()) {
-            // Save dialog.
-            try {
-                const saved = await app.SaveFileAs("ibmi-runsql.sql",
-                    btoa(unescape(encodeURIComponent(els.sqlInput.value))),
-                    "SQL Script", "*.sql");
-                if (!saved) return;
-                appendLogLine(t("spool.logSaved", "Saved to {path}").replace("{path}", saved), "msg-info", true);
-            } catch (err) {
-                showMessages([], String((err as Error)?.message ?? err));
-            }
-        } else {
-            // Open dialog into a blank editor.
-            try {
-                const text = await app.OpenFileAs("SQL Script", "*.sql");
-                if (!text) return;
-                els.sqlInput.value = text;
-                pushWorkspaceState();
-            } catch (err) {
-                showMessages([], String((err as Error)?.message ?? err));
-            }
-        }
-    })();
+// Open / Save As: Word-style editor file actions. The current script's
+// filename is tracked per tab so Save As prefills it (Word behavior).
+const scriptFileByTab = new Map<string, string>();
+
+function scriptFileName(): string {
+    const key = activeTab()?.key;
+    return (key && scriptFileByTab.get(key)) || "ibmi-runsql.sql";
+}
+
+async function openScriptIntoEditor(): Promise<void> {
+    const app = App();
+    if (!app) return;
+    try {
+        // OpenFileAs returns "<path>\n<text>" so we can track the filename
+        // for later Save As prefill.
+        const payload = await app.OpenFileAs("SQL Script", "*.sql");
+        if (!payload) return;
+        const nl = payload.indexOf("\n");
+        const path = nl >= 0 ? payload.slice(0, nl) : "";
+        const text = nl >= 0 ? payload.slice(nl + 1) : payload;
+        els.sqlInput.value = text;
+        pushWorkspaceState();
+        const key = activeTab()?.key;
+        if (key && path) scriptFileByTab.set(key, path.split(/[\\/]/).pop() ?? path);
+    } catch (err) {
+        showMessages([], String((err as Error)?.message ?? err));
+    }
+}
+
+async function saveEditorScriptAs(): Promise<void> {
+    const app = App();
+    if (!app) return;
+    try {
+        const saved = await app.SaveFileAs(scriptFileName(),
+            btoa(unescape(encodeURIComponent(els.sqlInput.value))),
+            "SQL Script", "*.sql");
+        if (!saved) return;
+        appendLogLine(t("spool.logSaved", "Saved to {path}").replace("{path}", saved), "msg-info", true);
+        const key = activeTab()?.key;
+        if (key) scriptFileByTab.set(key, saved.split(/[\\/]/).pop() ?? saved);
+    } catch (err) {
+        showMessages([], String((err as Error)?.message ?? err));
+    }
+}
+
+document.getElementById("btn-script-open")?.addEventListener("click", () => void openScriptIntoEditor());
+document.getElementById("btn-script-save")?.addEventListener("click", () => void saveEditorScriptAs());
+document.addEventListener("keydown", (ev: KeyboardEvent) => {
+    if (!(ev.metaKey || ev.ctrlKey)) return;
+    if (ev.key.toLowerCase() === "o") {
+        ev.preventDefault();
+        void openScriptIntoEditor();
+    } else if (ev.key.toLowerCase() === "s") {
+        ev.preventDefault();
+        void saveEditorScriptAs();
+    }
 });
 
 // Statement-history recall in the editor. F9 = previous (older), F8 = next

@@ -37,7 +37,7 @@ describe("settings pane", () => {
         await vi.waitFor(() => {
             expect(pane.root.querySelectorAll(".settings-key").length).toBe(2);
         });
-        expect(pane.root.querySelector(".settings-key.selected")?.textContent).toBe("Spooled file download directory");
+        expect(pane.root.querySelector(".settings-key.selected")?.textContent).toBe("Spooled files & downloads directory");
         expect(pane.root.querySelector<HTMLInputElement>(".settings-input")?.type).toBe("text");
         pane.root.remove();
     });

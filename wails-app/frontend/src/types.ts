@@ -167,6 +167,7 @@ export interface ConnectionProfile {
 
 export interface AppSettings {
     spoolDownloadDir?: string;
+    scriptsDir?: string;
     fetchSize?: number;
     autoOpenDownloads?: boolean; // legacy; superseded by spoolDblClickAction
     spoolDblClickAction?: "" | "view" | "dlPdf" | "dlText" | "print"; // "" = view
