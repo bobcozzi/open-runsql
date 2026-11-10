@@ -300,15 +300,23 @@ body {
     font-size: 11px;
 }
 
-/* Connecting status: dominant line under GO. Dark red in light mode; dark
- * green in dark mode (red-on-dark is hard to read). */
+/* Connecting status: dominant line under GO. Green on macOS, blue on
+ * Windows/Linux (red reads as an error). Brighter variants in dark mode. */
 .profile-hint.connecting {
     font-size: 14px;
     font-weight: 700;
-    color: #b00000;
+    color: #0000cc;
+}
+
+[data-os="mac"] .profile-hint.connecting {
+    color: #1e7e34;
 }
 
 [data-theme="dark"] .profile-hint.connecting {
+    color: #6ea8fe;
+}
+
+[data-theme="dark"][data-os="mac"] .profile-hint.connecting {
     color: #4caf50;
 }
 
@@ -1050,6 +1058,28 @@ body.resizing-v {
 .status-inline {
     color: var(--fg-dim);
     font-size: 12px;
+}
+
+/* Live run indicator next to the editor Save button: green on macOS, blue
+ * on Windows/Linux — brighter variants in dark mode. Pulses while running. */
+.run-status {
+    font-size: 13px;
+    font-weight: 700;
+    color: #0066cc;
+    animation: status-busy-pulse 1.2s ease-in-out infinite;
+    white-space: nowrap;
+}
+
+[data-os="mac"] .run-status {
+    color: #1e7e34;
+}
+
+[data-theme="dark"] .run-status {
+    color: #6ea8fe;
+}
+
+[data-theme="dark"][data-os="mac"] .run-status {
+    color: #4caf50;
 }
 
 /* Save-as button + format picker on the tab bar (Results). */

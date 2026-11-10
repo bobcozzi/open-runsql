@@ -953,6 +953,35 @@ func stripTrailingSemicolon(sql string) string {
 	return strings.TrimSpace(regexp.MustCompile(`;\s*$`).ReplaceAllString(sql, ""))
 }
 
+// dropLeadingComments removes comment-only lines/blocks from the head of a
+// statement so classifyEntry sees the real first token. A run can carry leading
+// comments when a trailing comment follows the previous statement's semicolon
+// (the splitter keeps them in the next span). Only the head is stripped —
+// comments after the code start are left for the host. Handles --, // and
+// /* */ forms.
+func dropLeadingComments(text string) string {
+	s := text
+	for {
+		t := strings.TrimLeft(s, " \t\r\n")
+		switch {
+		case strings.HasPrefix(t, "--") || strings.HasPrefix(t, "//"):
+			i := strings.IndexAny(t, "\r\n")
+			if i < 0 {
+				return ""
+			}
+			s = t[i+1:]
+		case strings.HasPrefix(t, "/*"):
+			i := strings.Index(t, "*/")
+			if i < 0 {
+				return ""
+			}
+			s = t[i+2:]
+		default:
+			return t
+		}
+	}
+}
+
 // classifyEntry splits the Command Entry text into SQL or CL.
 // Rules (aligned with cozzi-cl-prompter):
 //   - "CL:" prefix (or "CL <cmd>") forces CL mode.
@@ -960,8 +989,11 @@ func stripTrailingSemicolon(sql string) string {
 //   - Bare SELECT/VALUES/WITH/SET/CALL/INSERT/UPDATE/DELETE/CREATE/DROP/ALTER/...
 //     keywords are treated as SQL.
 //   - Anything else is treated as a CL command.
+//
+// Leading comment lines/blocks are skipped so a statement that opens with a
+// comment still classifies by its first real token.
 func classifyEntry(text string) (mode string, payload string) {
-	trimmed := strings.TrimSpace(text)
+	trimmed := dropLeadingComments(text)
 	if m := clPrefix.FindStringSubmatch(trimmed); m != nil {
 		return "CL", strings.TrimSpace(m[1])
 	}

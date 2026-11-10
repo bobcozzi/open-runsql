@@ -74,6 +74,7 @@ const en: Catalog = {
     "main.runningStatements": "Running {count} statements...",
     "main.runningStatementsFromCursor": "Running {count} statements from cursor...",
     "main.runningStatementOf": "Running statement {current} of {total}...",
+    "main.totalTime": "Total: {time}",
     "main.statementsCompleted": "{count} statements completed.",
     "main.logStop": "STOP encountered — ending the run.",
     "main.stoppedAt": "Stopped at STOP (statement {current} of {total}).",

@@ -28,6 +28,61 @@ describe("splitStatements", () => {
     it("no trailing empty statement", () => {
         expect(splitStatements("SELECT 1 FROM SYSIBM.SYSDUMMY1;")).toHaveLength(1);
     });
+
+    it("treats // as a line comment and strips it from the text sent to the host", () => {
+        const src = "select * from QIWS.QCUSTCDT; // Query test file\nselect 1 from sysibm.sysdummy1";
+        const spans = splitStatements(src);
+        expect(spans).toHaveLength(2);
+        expect(spans[0].text).toBe("select * from QIWS.QCUSTCDT");
+        expect(spans[1].text).toBe("select 1 from sysibm.sysdummy1");
+    });
+
+    it("// comment on its own line produces no statement", () => {
+        const src = "// just a comment\nselect 1 from sysibm.sysdummy1";
+        const spans = splitStatements(src);
+        expect(spans).toHaveLength(1);
+        expect(spans[0].text).toBe("select 1 from sysibm.sysdummy1");
+    });
+
+    it("// comment-only input yields nothing", () => {
+        expect(splitStatements("// nothing here\n// or here")).toHaveLength(0);
+    });
+
+    it("// inside a string literal is NOT a comment", () => {
+        const src = "select 'http://x' from sysibm.sysdummy1";
+        const spans = splitStatements(src);
+        expect(spans).toHaveLength(1);
+        expect(spans[0].text).toContain("'http://x'");
+    });
+
+    it("statement split across a comment line before its semicolon", () => {
+        const src = "select a,b,c from qsysibm.sysdummy1  -- Dummy query\n;\n-- comment line\nselect 2 from sysibm.sysdummy1";
+        const spans = splitStatements(src);
+        expect(spans).toHaveLength(2);
+        expect(spans[0].text).toContain("select a,b,c from qsysibm.sysdummy1");
+    });
+
+    it("strips -- comments from the text sent to the host", () => {
+        const src = "select * from QIWS.QCUSTCDT; -- Query test file\nselect 1 from sysibm.sysdummy1";
+        const spans = splitStatements(src);
+        expect(spans).toHaveLength(2);
+        expect(spans[0].text).toBe("select * from QIWS.QCUSTCDT");
+    });
+
+    it("strips /* */ block comments from the text", () => {
+        const src = "select /* inline note */ a, b from qiws.qcustcdt";
+        const spans = splitStatements(src);
+        expect(spans).toHaveLength(1);
+        expect(spans[0].text).toBe("select  a, b from qiws.qcustcdt");
+    });
+
+    it("caret-follow: span.start skips leading comment lines to the first code token", () => {
+        const src = "select * from aiddata.restocking;  -- get restockings\n  -- test file\nselect * from qiws.qcustcdt;";
+        const spans = splitStatements(src);
+        expect(spans).toHaveLength(2);
+        // second span's start must land on the select, not the "--" lines
+        expect(src.slice(spans[1].start)).toMatch(/^select \* from qiws/);
+    });
 });
 
 describe("isStopStatement", () => {
@@ -71,9 +126,17 @@ describe("statementAt / statementsFrom", () => {
             "SELECT 3 FROM SYSIBM.SYSDUMMY1",
         ]);
     });
-    it("caret in whitespace between statements finds nothing", () => {
-        const gap = splitStatements(src)[0].end; // right after first ';'
-        expect(statementAt(src, gap)).toBeUndefined();
+    it("caret just before the terminating semicolon still runs that statement", () => {
+        const gap = splitStatements(src)[0].end; // offset OF the ';'
+        expect(statementAt(src, gap)?.text).toBe("SELECT 1 FROM SYSIBM.SYSDUMMY1");
+    });
+    it("caret just after the terminating semicolon moves FORWARD to the next statement", () => {
+        const semi = splitStatements(src)[0].end;
+        expect(statementAt(src, semi + 1)?.text).toBe("SELECT 2 FROM SYSIBM.SYSDUMMY1");
+    });
+    it("caret just after a semicolon on a middle line moves FORWARD", () => {
+        const second = splitStatements(src)[1];
+        expect(statementAt(src, second.end + 1)?.text).toBe("SELECT 3 FROM SYSIBM.SYSDUMMY1");
     });
     it("caret on the blank row after the last statement still runs it (no semicolon)", () => {
         // "select ...\n<caret>" — Enter pressed, no ';' anywhere (ACS look-back).
@@ -97,5 +160,12 @@ describe("statementAt / statementsFrom", () => {
     it("caret on empty text matches nothing", () => {
         expect(statementAt("", 0)).toBeUndefined();
         expect(statementAt("   \n  ", 3)).toBeUndefined();
+    });
+    it("reported case: cursor just after the semicolon on line 2 moves forward to line 3", () => {
+        const buf = "select * from table(sqltools.fd_list('aiddata','restock*'));\nselect * from aiddata.restocking;\nselect * from qiws.qcustcdt;\n";
+        const second = splitStatements(buf)[1];
+        expect(statementAt(buf, second.end + 1)?.text).toBe("select * from qiws.qcustcdt");
+        // ...while a caret ON line 2's semicolon still runs line 2.
+        expect(statementAt(buf, second.end)?.text).toBe("select * from aiddata.restocking");
     });
 });

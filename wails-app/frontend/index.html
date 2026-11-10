@@ -130,8 +130,9 @@
                     </svg>
                 </button>
             </span>
-            <span class="hint">SQL &mdash; or prefix with <code>CL:</code> for IBM i commands (e.g.
-                <code>CL: WRKSYSSTS OUTPUT(*PRINT)</code>)</span>
+            <span id="run-status" class="run-status" hidden></span>
+            <span class="hint" id="input-hint">SQL &mdash; or prefix with <code>CL:</code> for IBM i commands (e.g.
+                <code>CL: ADDLIBLE LIB(SQLTOOLS)</code>)</span>
         </div>
         <textarea id="sql-input" class="sql-input" spellcheck="false" autocomplete="off" autocorrect="off"
             autocapitalize="off"

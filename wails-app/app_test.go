@@ -41,3 +41,28 @@ func TestMergeProfile(t *testing.T) {
 		}
 	})
 }
+
+func TestClassifyEntryLeadingComments(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		mode    string
+		payload string
+	}{
+		{"dash comment then select", "-- get restockings\nselect * from qiws.qcustcdt", "SQL", "select * from qiws.qcustcdt"},
+		{"slash comment then select", "// note\nselect * from qiws.qcustcdt", "SQL", "select * from qiws.qcustcdt"},
+		{"block comment then select", "/* note */ select 1 from sysibm.sysdummy1", "SQL", "select 1 from sysibm.sysdummy1"},
+		{"multi comment then select", "-- a\n// b\n/* c */\nselect 1 from sysibm.sysdummy1", "SQL", "select 1 from sysibm.sysdummy1"},
+		{"comment then CL", "-- note\nCL: DSPLIBL", "CL", "DSPLIBL"},
+		{"comment only", "-- nothing\n// here", "CL", ""},
+		{"plain select untouched", "select 1 from sysibm.sysdummy1", "SQL", "select 1 from sysibm.sysdummy1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mode, payload := classifyEntry(tc.in)
+			if mode != tc.mode || payload != tc.payload {
+				t.Fatalf("classifyEntry(%q) = (%q, %q), want (%q, %q)", tc.in, mode, payload, tc.mode, tc.payload)
+			}
+		})
+	}
+}

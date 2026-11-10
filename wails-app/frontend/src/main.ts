@@ -61,6 +61,8 @@ const els = {
     resultHead: el<HTMLTableSectionElement>("result-head"),
     resultBody: el<HTMLTableSectionElement>("result-body"),
     statusText: el<HTMLSpanElement>("status-text"),
+    runStatus: el<HTMLSpanElement>("run-status"),
+    inputHint: el<HTMLSpanElement>("input-hint"),
     btnLoadMore: el<HTMLButtonElement>("btn-load-more"),
     btnLoadAll: el<HTMLButtonElement>("btn-load-all"),
     saveResultsWrap: el<HTMLSpanElement>("save-results-wrap"),
@@ -2596,6 +2598,55 @@ function setRunning(on: boolean): void {
     els.btnCancel.disabled = !on;
 }
 
+// Live busy indicator: status-busy styling + an elapsed-time ticker on the
+// status line so a long-running statement (slow host link) is obviously in
+// flight. Cancel stays enabled (setRunning). Ticker stops on runTimerStop.
+let runTimerId: ReturnType<typeof setInterval> | undefined;
+let runTimerBase = "";
+let runTimerStart = 0;
+let runTimerTotalStart = 0; // 0 = no continuous total (single Run Selected)
+
+function fmtElapsed(ms: number): string {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    return m > 0 ? `${m}m ${s % 60}s` : `${s}s`;
+}
+
+function runTimerTick(): void {
+    const now = performance.now();
+    const stmt = fmtElapsed(now - runTimerStart);
+    const total = runTimerTotalStart > 0 ? ` ${t("main.totalTime", "Total: {time}").replace("{time}", fmtElapsed(now - runTimerTotalStart))}` : "";
+    els.runStatus.textContent = `${runTimerBase} ${stmt}${total}`;
+}
+
+// totalStart: pass performance.now() on the FIRST statement of a batch to show
+// a continuous "Total:"; omit (0) on later statements / Run Selected.
+function runTimerStartNow(base: string, totalStart = 0): void {
+    // Re-callable per statement: reset the per-statement clock, reuse the
+    // single interval. The total clock only moves when a new totalStart is
+    // passed (batch start) — later per-statement calls leave it alone.
+    runTimerBase = base;
+    runTimerStart = performance.now();
+    if (totalStart > 0) runTimerTotalStart = totalStart;
+    els.runStatus.hidden = false;
+    els.inputHint.hidden = true; // free the space while the timer shows
+    runTimerTick();
+    if (runTimerId === undefined) {
+        runTimerId = setInterval(runTimerTick, 500);
+    }
+}
+
+function runTimerStop(): void {
+    if (runTimerId !== undefined) {
+        clearInterval(runTimerId);
+        runTimerId = undefined;
+    }
+    runTimerTotalStart = 0;
+    els.runStatus.hidden = true;
+    els.runStatus.textContent = "";
+    els.inputHint.hidden = false;
+}
+
 // Run Selected: selection if any, else statement at caret; nothing in empty space.
 async function doRun(): Promise<void> {
     if (!activeTab()?.connectionId || state.running) return;
@@ -2612,10 +2663,11 @@ async function doRun(): Promise<void> {
     }
     if (!text) return;
     setRunning(true);
-    els.statusText.textContent = t("main.running", "Running...");
+    runTimerStartNow(t("main.running", "Running..."));
     try {
         await runOne(text, t("main.logRunSelected", "Run Selected..."));
     } finally {
+        runTimerStop();
         setRunning(false);
     }
 }
@@ -2646,9 +2698,8 @@ async function doRunAll(): Promise<void> {
     if (!activeTab()?.connectionId || state.running) return;
     const stmts = splitStatements(els.sqlInput.value);
     if (!stmts.length) return;
-    clearMessages();
     setRunning(true);
-    els.statusText.textContent = t("main.runningStatements", "Running {count} statements...").replace("{count}", String(stmts.length));
+    const batchStart = performance.now();
     try {
         for (let i = 0; i < stmts.length; i += 1) {
             setCaretToOffset(stmts[i].start);
@@ -2657,13 +2708,15 @@ async function doRunAll(): Promise<void> {
                 els.statusText.textContent = t("main.stoppedAt", "Stopped at STOP (statement {current} of {total}).").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
                 return;
             }
-            els.statusText.textContent = t("main.runningStatementOf", "Running statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
+            const label = t("main.runningStatementOf", "Running statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
+            runTimerStartNow(label, i === 0 ? batchStart : 0);
             await runOne(stmts[i].text, t("main.logRunAllStatement", "Run All — statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length)));
         }
         els.statusText.textContent = t("main.statementsCompleted", "{count} statements completed.").replace("{count}", String(stmts.length));
     } catch {
         // runOne already surfaced the error; stop the batch.
     } finally {
+        runTimerStop();
         setRunning(false);
     }
 }
@@ -2675,9 +2728,8 @@ async function doRunFromSelected(): Promise<void> {
     const pos = els.sqlInput.selectionStart ?? 0;
     const stmts = statementsFrom(src, pos);
     if (!stmts.length) return;
-    clearMessages();
     setRunning(true);
-    els.statusText.textContent = t("main.runningStatementsFromCursor", "Running {count} statements from cursor...").replace("{count}", String(stmts.length));
+    const batchStart = performance.now();
     try {
         for (let i = 0; i < stmts.length; i += 1) {
             setCaretToOffset(stmts[i].start);
@@ -2686,13 +2738,15 @@ async function doRunFromSelected(): Promise<void> {
                 els.statusText.textContent = t("main.stoppedAt", "Stopped at STOP (statement {current} of {total}).").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
                 return;
             }
-            els.statusText.textContent = t("main.runningStatementOf", "Running statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
+            const label = t("main.runningStatementOf", "Running statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
+            runTimerStartNow(label, i === 0 ? batchStart : 0);
             await runOne(stmts[i].text, t("main.logRunFromStatement", "Run from Selected — statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length)));
         }
         els.statusText.textContent = t("main.statementsCompleted", "{count} statements completed.").replace("{count}", String(stmts.length));
     } catch {
         // stop batch on failure
     } finally {
+        runTimerStop();
         setRunning(false);
     }
 }
