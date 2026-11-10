@@ -8,7 +8,7 @@ ifeq ($(shell uname -s),Darwin)
 export CGO_LDFLAGS := -framework UniformTypeIdentifiers
 endif
 
-.PHONY: all jar frontend run build dev clean
+.PHONY: all jar frontend run build dev clean dmg
 
 all: jar frontend build
 
@@ -38,6 +38,18 @@ dist: frontend winres
 	GOOS=darwin GOARCH=arm64 go build -tags production -ldflags "-s -w" -o ibmi-runsql .
 	# Intel Mac (only when someone asks):
 	# GOOS=darwin GOARCH=amd64 go build -tags production -ldflags "-s -w" -o ibmi-runsql-macIntel .
+
+# macOS drag-to-Applications DMG. Rebuilds the binary straight into the .app
+# bundle (keeps Info.plist/AppIcon.icns), stages it next to an /Applications
+# symlink, and packs a compressed UDZO image. Output: ibmi-runsql.dmg
+dmg:
+	go build -tags production -ldflags "-s -w" -o ibmi-runsql.app/Contents/MacOS/ibmi-runsql .
+	rm -rf /tmp/dmg-stage ibmi-runsql.dmg
+	mkdir -p /tmp/dmg-stage
+	cp -R ibmi-runsql.app /tmp/dmg-stage/
+	ln -s /Applications /tmp/dmg-stage/Applications
+	hdiutil create -volname "IBM i RunSQL" -srcfolder /tmp/dmg-stage -ov -format UDZO ibmi-runsql.dmg
+	rm -rf /tmp/dmg-stage
 
 # Windows icon/manifest resources. The Go linker auto-embeds rsrc_windows_amd64.syso
 # (main package dir) when building GOOS=windows. Regenerated from packaging/windows/
