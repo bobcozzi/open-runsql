@@ -1161,6 +1161,27 @@ func (a *App) CloseAllPinnedWindows() {
 	}
 }
 
+// ClosePinnedWindowsFor closes only the popped-out pinned windows belonging to
+// one connection, leaving the pinned subtabs (and their data) intact. Each
+// window's WindowClosing handler emits pinned:closed, so the main window
+// restores those subtabs.
+func (a *App) ClosePinnedWindowsFor(connectionID string) {
+	a.mu.Lock()
+	var wins []*application.WebviewWindow
+	for key, w := range a.pinnedWins {
+		if strings.HasPrefix(key, connectionID+"/") {
+			if w != nil {
+				wins = append(wins, w)
+			}
+			delete(a.pinnedWins, key)
+		}
+	}
+	a.mu.Unlock()
+	for _, w := range wins {
+		w.Close()
+	}
+}
+
 // DetachConnection opens a torn-off window for a connection. Native v3: a new
 // WebviewWindow on the same process, sharing the bridge JVM and workspace
 // store. The window's frontend boots into single-connection mode via the

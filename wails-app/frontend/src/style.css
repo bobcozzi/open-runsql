@@ -1021,6 +1021,19 @@ font-size: 12px;
     background: var(--bg);
 }
 
+/* Mouse-click focus on a subtab reads as a stray ring; keep the ring only for
+ * keyboard focus-visible so Tab navigation stays accessible. */
+.result-subtab:focus:not(:focus-visible) {
+    outline: none;
+}
+
+/* Subtab selection is shown by .active; on keyboard focus keep the accent
+ * ring but don't double it with the active border. */
+.result-subtab:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+}
+
 .result-subtab-close {
     color: var(--fg-dim);
     font-size: 13px;
@@ -1057,14 +1070,71 @@ font-size: 12px;
     flex: 1;
 }
 
-.result-subtab-closeall {
-    color: var(--fg-dim);
-    border-style: dashed;
+mouse-focus outline reads as a red * glow against the error hover. Suppress mouse-focus ring;
+
+keep keyboard * focus-visible for accessibility. */ .result-subtab-closeall:focus:not(:focus-visible) {
+    outline: none;
+}
+
+.result-subtab-closeall:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px solid;
+}
+
+/* The action fires on click; a lingering focus outline reads as a red glow
+ * against the error hover. Suppress it like the other subtab buttons. */
+.result-subtab-closeall:focus,
+.result-subtab-closeall:focus-visible {
+    outline: none;
 }
 
 .result-subtab-closeall:hover {
     color: var(--error);
     border-color: var(--error);
+}
+
+/* Small modal for the "Close pinned" scope picker. */
+.confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1200;
+}
+
+.confirm-dialog {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 280px;
+}
+
+.confirm-title {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--fg);
+}
+
+.confirm-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--fg);
+    cursor: pointer;
+}
+
+.confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 6px;
 }
 
 /* Standalone pinned-result window (pinned.html). */

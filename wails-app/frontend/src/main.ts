@@ -1366,7 +1366,7 @@ function restoreActiveTab(): void {
         els.btnLoadMore.hidden = pinnedView || !state.more;
         els.btnLoadAll.hidden = pinnedView || !state.more;
         els.saveResultsWrap.hidden = displayedData().rows.length === 0;
-        els.btnPinResult.hidden = pinnedView || displayedData().rows.length === 0;
+        els.btnPinResult.disabled = pinnedView || displayedData().rows.length === 0;
     } else {
         els.resultHead.innerHTML = "";
         els.resultBody.innerHTML = "";
@@ -1375,7 +1375,7 @@ function restoreActiveTab(): void {
         els.btnLoadAll.hidden = true;
         renderResultSubtabs();
     }
-    if (!snap?.showingResults) els.btnPinResult.hidden = true;
+    if (!snap?.showingResults) els.btnPinResult.disabled = true;
     showPane(pane);
     // Spooled Files: refresh when the visible list belongs to a different
     // connection (mirrors the work-tab click handler's stale reload).
@@ -1549,6 +1549,7 @@ function syncConnectionUi(): void {
     els.btnRunAll.disabled = !connected;
     els.btnRunFrom.disabled = !connected;
     els.btnPrompt.disabled = !connected;
+    els.btnPinResult.disabled = true; // needs a result set, not just a connection
     els.btnCancel.disabled = true;
     els.connectPanel.hidden = connected;
     // The bottom tab bar is ALWAYS visible/clickable. Connections/Settings
@@ -1890,27 +1891,96 @@ function renderResultSubtabs(): void {
         if (!poppedOutPins.has(p.id)) strip.appendChild(mk(p.id, p.label, p));
     }
 
-    // "Close all pinned" at the right end of the strip (only when pins exist).
+    // "Close pinned..." opens a small scope dialog (windows / results / both).
     const spacer = document.createElement("span");
     spacer.className = "result-subtabs-spacer";
     strip.appendChild(spacer);
-    const closeAll = document.createElement("button");
-    closeAll.type = "button";
-    closeAll.className = "result-subtab result-subtab-closeall";
-    closeAll.textContent = t("result.closeAllPins", "Close all pinned");
-    closeAll.title = t("result.closeAllPinsTitle", "Close every pinned result tab and any popped-out pinned windows");
-    closeAll.addEventListener("click", () => {
-        pinnedResults = [];
-        poppedOutPins.clear();
-        activePinnedId = "";
-        renderResultSubtabs();
-        selectResultSubtab("");
-        syncPinnedWorkspace();
-        // Also close any popped-out pinned windows for every connection.
-        void App()?.CloseAllPinnedWindows().catch(() => { /* best effort */ });
-        appendLogLine(t("result.closedAllPins", "Closed all pinned results"), "msg-info", true);
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "result-subtab result-subtab-closeall";
+    closeBtn.textContent = t("result.closePinned", "Close pinned…");
+    closeBtn.title = t("result.closePinnedTitle", "Close pinned results and/or popped-out pinned windows");
+    closeBtn.addEventListener("click", () => showClosePinnedDialog());
+    strip.appendChild(closeBtn);
+}
+
+// Scope dialog for closing pinned items: checkboxes for windows + results
+// (both default on). OK applies the chosen scope; Cancel/Esc dismisses.
+function showClosePinnedDialog(): void {
+    const app = App();
+    const connId = activeTab()?.connectionId ?? "";
+
+    const overlay = document.createElement("div");
+    overlay.className = "confirm-overlay";
+    const box = document.createElement("div");
+    box.className = "confirm-dialog";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+
+    const title = document.createElement("div");
+    title.className = "confirm-title";
+    title.textContent = t("result.closePinnedDlgTitle", "Close pinned");
+    box.appendChild(title);
+
+    const mkCheck = (key: string, labelKey: string, fb: string): HTMLInputElement => {
+        const lab = document.createElement("label");
+        lab.className = "confirm-check";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = true;
+        cb.dataset.scope = key;
+        const span = document.createElement("span");
+        span.textContent = t(labelKey, fb);
+        lab.appendChild(cb);
+        lab.appendChild(span);
+        box.appendChild(lab);
+        return cb;
+    };
+    const cbWindows = mkCheck("windows", "result.closePinnedWindows", "Pinned windows (popped out)");
+    const cbResults = mkCheck("results", "result.closePinnedResults", "Pinned results (tabs)");
+
+    const btnRow = document.createElement("div");
+    btnRow.className = "confirm-actions";
+    const btnOk = document.createElement("button");
+    btnOk.type = "button";
+    btnOk.className = "btn primary";
+    btnOk.textContent = t("confirm.ok", "OK");
+    const btnCancel = document.createElement("button");
+    btnCancel.type = "button";
+    btnCancel.className = "btn";
+    btnCancel.textContent = t("confirm.cancel", "Cancel");
+    btnRow.appendChild(btnOk);
+    btnRow.appendChild(btnCancel);
+    box.appendChild(btnRow);
+    overlay.appendChild(box);
+
+    const close = () => overlay.remove();
+    overlay.addEventListener("click", (ev) => { if (ev.target === overlay) close(); });
+    overlay.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); close(); } });
+    btnCancel.addEventListener("click", close);
+    btnOk.addEventListener("click", () => {
+        const doWindows = cbWindows.checked;
+        const doResults = cbResults.checked;
+        close();
+        if (!doWindows && !doResults) return;
+        if (doWindows && connId) {
+            // Close this connection's pop-out windows; pinned:closed restores
+            // their subtabs unless we're also clearing results below.
+            void app?.ClosePinnedWindowsFor(connId).catch(() => { /* best effort */ });
+        }
+        if (doResults) {
+            pinnedResults = [];
+            poppedOutPins.clear();
+            activePinnedId = "";
+            renderResultSubtabs();
+            selectResultSubtab("");
+            syncPinnedWorkspace();
+            appendLogLine(t("result.closedAllPins", "Closed all pinned results"), "msg-info", true);
+        }
     });
-    strip.appendChild(closeAll);
+
+    document.body.appendChild(overlay);
+    btnOk.focus();
 }
 
 function selectResultSubtab(id: string): void {
@@ -1931,7 +2001,7 @@ function selectResultSubtab(id: string): void {
         els.btnLoadAll.hidden = !state.more;
     }
     els.saveResultsWrap.hidden = total === 0;
-    els.btnPinResult.hidden = pinned || total === 0;
+    els.btnPinResult.disabled = pinned || total === 0;
     if (pinned) {
         els.statusText.textContent = t("result.pinnedStatus", "{count} row(s) (pinned)").replace("{count}", String(total));
     }
@@ -2005,7 +2075,7 @@ function updateStatus(kind: string, result: SqlResult | undefined, totalRows: nu
     // Load more/all page the live cursor — not applicable to a frozen pin.
     const pinnedView = !!activePinnedId;
     if (pinnedView) { els.btnLoadMore.hidden = true; els.btnLoadAll.hidden = true; }
-    els.btnPinResult.hidden = !(kind === "rows" && totalRows > 0) || pinnedView;
+    els.btnPinResult.disabled = !(kind === "rows" && totalRows > 0) || pinnedView;
 }
 
 // Save the result grid: native Save dialog (name + location), chosen format.
@@ -2316,6 +2386,13 @@ async function runOne(text: string, actionLabel = t("main.logRunSelected", "Run 
     els.resultBody.innerHTML = "";
     els.btnLoadMore.hidden = true;
     els.btnLoadAll.hidden = true;
+    // A new run targets the live "Results" subtab: switch the strip now so the
+    // grid the user watches fill up is the live one, not a pinned snapshot that
+    // still shows as the active subtab.
+    if (activePinnedId !== "") {
+        activePinnedId = "";
+        renderResultSubtabs();
+    }
     // CL commands have no result set — their output is the Messages pane
     // (action log + CPF/CPC messages). SQL stays on Results.
     showPane(/^\s*CL\s*:/i.test(text) ? "messages" : "results");
@@ -2343,6 +2420,9 @@ async function runOne(text: string, actionLabel = t("main.logRunSelected", "Run 
             } else {
                 logExecution(actionLabel, text, t("main.logStatementRan", "Statement ran successfully   ({ms} ms)").replace("{ms}", String(sqlResult.elapsedMs ?? elapsed)));
             }
+            // Set rows BEFORE showSqlResult so its renderTable() paints the new
+            // columns+rows together (previously rows landed after the render,
+            // producing a one-frame "cleared" flash when a pinned tab had focus).
             state.rows = sqlResult.kind === "rows" ? sqlResult.rows ?? [] : [];
             showSqlResult(sqlResult);
         }
@@ -2360,6 +2440,8 @@ function setRunning(on: boolean): void {
     els.btnRun.disabled = on;
     els.btnRunAll.disabled = on;
     els.btnRunFrom.disabled = on;
+    // Pinning a result mid-run would snapshot the cleared/refreshing grid.
+    if (on) els.btnPinResult.disabled = true;
     els.btnCancel.disabled = !on;
 }
 
@@ -3130,7 +3212,7 @@ if (detachedConnId) {
             els.btnLoadMore.hidden = pinnedView || !state.more;
             els.btnLoadAll.hidden = pinnedView || !state.more;
             els.saveResultsWrap.hidden = displayedData().rows.length === 0;
-            els.btnPinResult.hidden = pinnedView || displayedData().rows.length === 0;
+            els.btnPinResult.disabled = pinnedView || displayedData().rows.length === 0;
             showPane("results");
         }
     };

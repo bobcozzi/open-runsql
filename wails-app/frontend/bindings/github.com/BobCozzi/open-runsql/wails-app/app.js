@@ -69,6 +69,18 @@ export function CloseAllPinnedWindows() {
 }
 
 /**
+ * ClosePinnedWindowsFor closes only the popped-out pinned windows belonging to
+ * one connection, leaving the pinned subtabs (and their data) intact. Each
+ * window's WindowClosing handler emits pinned:closed, so the main window
+ * restores those subtabs.
+ * @param {string} connectionID
+ * @returns {$CancellablePromise<void>}
+ */
+export function ClosePinnedWindowsFor(connectionID) {
+    return $Call.ByID(1669307257, connectionID);
+}
+
+/**
  * Connect opens a new JDBC connection to the IBM i.
  * @param {$models.ConnectRequest} req
  * @returns {$CancellablePromise<$models.ConnectResponse | null>}

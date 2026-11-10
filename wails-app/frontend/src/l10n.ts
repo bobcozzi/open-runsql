@@ -282,8 +282,11 @@ const en: Catalog = {
     "result.latestTabTitle": "Live result (replaced on each run)",
     "result.pinTabTitle": "Pinned result — double-click or right-click to rename",
     "result.closePin": "Close pinned result",
-    "result.closeAllPins": "Close all pinned",
-    "result.closeAllPinsTitle": "Close every pinned result tab and any popped-out pinned windows",
+    "result.closePinned": "Close pinned…",
+    "result.closePinnedTitle": "Close pinned results and/or popped-out pinned windows",
+    "result.closePinnedDlgTitle": "Close pinned",
+    "result.closePinnedWindows": "Pinned windows (popped out)",
+    "result.closePinnedResults": "Pinned results (tabs)",
     "result.closedAllPins": "Closed all pinned results",
     "result.popOut": "Open in its own window",
     "result.popOutOpening": "Opening \"{label}\" in its own window...",
@@ -300,6 +303,8 @@ const en: Catalog = {
     "history.empty": "No statements logged for this connection yet.",
     "history.noMatch": "No entries match.",
     "history.delete": "Remove from history",
+    "confirm.ok": "OK",
+    "confirm.cancel": "Cancel",
 };
 
 const CATALOGS: Record<string, () => Catalog> = {

@@ -243,6 +243,7 @@ export interface AppBinding {
     UpdatePinnedResults(connectionId: string, pinned: PinnedResult[]): Promise<void>;
     OpenPinnedWindow(connectionId: string, pinId: string, title: string): Promise<void>;
     CloseAllPinnedWindows(): Promise<void>;
+    ClosePinnedWindowsFor(connectionId: string): Promise<void>;
     DetachedConnectionID(): Promise<string>;
     Version(): Promise<string>;
 }
