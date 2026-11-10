@@ -268,7 +268,7 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
         }
         inBidi.value = p?.bidiStringType ?? "";
         inSchema.value = p?.defaultSchema ?? "";
-        inNaming.value = p?.naming || "sql";
+        inNaming.value = p?.naming || "system";
         inTls.checked = !!p?.tls;
         inSavePw.checked = !!p?.savePassword;
         inPreload.checked = p?.preloadSpool !== false;

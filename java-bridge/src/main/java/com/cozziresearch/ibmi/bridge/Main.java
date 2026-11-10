@@ -91,7 +91,7 @@ public final class Main {
                 String user = required(r, "user");
                 String password = required(r, "password");
                 boolean tls = r.path("tls").asBoolean(false);
-                String naming = text(r, "naming", "sql").toLowerCase(Locale.ROOT);
+                String naming = text(r, "naming", "system").toLowerCase(Locale.ROOT);
                 if (!naming.equals("sql") && !naming.equals("system"))
                     throw new IllegalArgumentException("naming must be 'sql' or 'system'");
                 // Bidi string type: "" = driver default (JT400 picks per job

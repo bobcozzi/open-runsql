@@ -310,7 +310,7 @@ const SETTING_DEFS: SettingDef[] = [
         key: "defaultNaming",
         type: "choice",
         options: [["sql", "SQL"], ["system", "SYS"]],
-        get: (s) => s.defaultNaming || "sql",
+        get: (s) => s.defaultNaming || "system",
         withValue: (s, v) => ({ ...s, defaultNaming: v as AppSettings["defaultNaming"] }),
         persist: (v) => App()?.SetAppSetting("defaultNaming", v) ?? Promise.resolve(),
     },
@@ -386,7 +386,7 @@ const SETTING_DEFS: SettingDef[] = [
                 if (key === "theme") setTheme(value as ThemeMode);
                 else if (key === "fetchSize") state.fetchSize = Number(value) || 200;
                 else if (key === "spoolDblClickAction") spoolDblClickAction = (value || "view") as SpoolDblClickAction;
-                else if (key === "defaultNaming") el<HTMLSelectElement>("in-naming").value = value || "sql";
+                else if (key === "defaultNaming") el<HTMLSelectElement>("in-naming").value = value || "system";
                 else if (key === "resultsFontSize") applyResultsFontSize(Number(value) || 12);
                 else if (key === "spoolMaxRows") appSettingsCache = { ...appSettingsCache, spoolMaxRows: Number(value) || 0 };
                 else if (key === "confirmSpoolDelete") confirmSpoolDelete = value !== "off";
@@ -1505,7 +1505,7 @@ function restoreActiveTab(): void {
     el<HTMLInputElement>("in-user").value = cf?.user ?? "";
     el<HTMLInputElement>("in-password").value = cf?.password ?? "";
     el<HTMLInputElement>("in-schema").value = cf?.schema ?? "";
-    el<HTMLSelectElement>("in-naming").value = cf?.naming ?? "sql";
+    el<HTMLSelectElement>("in-naming").value = cf?.naming ?? "system";
     // TLS / Save password: a tab with its own form state wins; a fresh tab
     // falls back to the user's sticky localStorage choice (not a hard false).
     el<HTMLInputElement>("in-tls").checked = cf?.tls ?? (localStorage.getItem("ibmi-runsql-qc-tls") === "1");
@@ -2404,7 +2404,7 @@ function fillFormFromProfile(p: ConnectionProfile, password?: string): void {
     el<HTMLInputElement>("in-host").value = p.host;
     el<HTMLInputElement>("in-user").value = p.user;
     el<HTMLInputElement>("in-schema").value = p.defaultSchema ?? "";
-    el<HTMLSelectElement>("in-naming").value = p.naming || "sql";
+    el<HTMLSelectElement>("in-naming").value = p.naming || "system";
     el<HTMLInputElement>("in-tls").checked = !!p.tls;
     el<HTMLInputElement>("in-save-password").checked = !!p.savePassword;
     // Per-connection spool preload: this profile's value wins for this tab.
@@ -2417,6 +2417,22 @@ function fillFormFromProfile(p: ConnectionProfile, password?: string): void {
         pwField.value = "";
         pwField.focus();
     }
+}
+
+// "New connection" dropdown item: clear the Quick Connect form to blank and
+// reset the switches to the user's sticky localStorage state. GO hides (nothing
+// armed); Connect handles the new connection.
+function clearConnectForm(): void {
+    el<HTMLInputElement>("in-host").value = "";
+    el<HTMLInputElement>("in-user").value = "";
+    el<HTMLInputElement>("in-password").value = "";
+    el<HTMLInputElement>("in-schema").value = "";
+    el<HTMLSelectElement>("in-naming").value = appSettingsCache.defaultNaming || "system";
+    el<HTMLInputElement>("in-tls").checked = localStorage.getItem("ibmi-runsql-qc-tls") === "1";
+    el<HTMLInputElement>("in-save-password").checked = localStorage.getItem("ibmi-runsql-qc-savepw") === "1";
+    const go = document.getElementById("btn-go") as HTMLButtonElement | null;
+    if (go) { delete go.dataset.armed; go.disabled = true; go.hidden = true; }
+    el<HTMLInputElement>("in-host").focus();
 }
 
 /** Connections pane "Connect in new Tab": fill the form from the profile and
@@ -3194,6 +3210,18 @@ async function bumpProfile(name: string): Promise<void> {
 function renderSavedHosts(filter = ""): void {
     const popup = el<HTMLDivElement>("saved-hosts-popup");
     popup.innerHTML = "";
+    // "New connection" first: clears the form back to blank + sticky switch
+    // state for starting a connection that isn't one of the saved ones.
+    const newItem = document.createElement("button");
+    newItem.type = "button";
+    newItem.className = "combo-item combo-new";
+    newItem.textContent = t("main.newConnection", "+ New connection");
+    newItem.title = t("main.newConnectionTitle", "Clear the form to start a new connection");
+    newItem.addEventListener("click", () => {
+        clearConnectForm();
+        popup.hidden = true;
+    });
+    popup.appendChild(newItem);
     const q = filter.trim().toLowerCase();
     const matches = q
         ? profiles.filter((p) =>

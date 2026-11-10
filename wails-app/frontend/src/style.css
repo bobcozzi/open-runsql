@@ -395,6 +395,18 @@ body {
     color: #fff;
 }
 
+/* "New connection" dropdown action: set off from the saved entries. */
+.combo-new {
+    color: var(--accent);
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+}
+
+.combo-new:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
 .combo-empty {
     color: var(--fg-dim);
     cursor: default;
@@ -1716,13 +1728,20 @@ tr:nth-child(even) td {
 }
 
 /* In the Settings pane, selects and on/off toggles size to their content — no
- * 560px-wide dropdown for a two-choice list. Text/number/folder inputs keep
- * flex:1 (they benefit from the width). Scoped to .settings-editor so the
- * Connections pane's intentional full-width fields are untouched. */
+ * 560px-wide dropdown for a two-choice list. Number inputs size to a few digits;
+ * folder/text inputs keep flex:1 (paths/long text benefit from the width).
+ * Scoped to .settings-editor so the Connections pane's fields are separate. */
 .settings-editor select.settings-input,
-.settings-editor input[type="checkbox"] {
+.settings-editor input[type="checkbox"],
+.settings-editor input[type="number"].settings-input {
     flex: none;
     width: auto;
+}
+
+/* Number inputs need only a handful of digits. */
+.settings-editor input[type="number"].settings-input {
+    width: 8ch;
+    min-width: 8ch;
 }
 
 .settings-desc {
@@ -1791,16 +1810,22 @@ tr:nth-child(even) td {
     color: var(--fg-dim);
 }
 
+/* The field label is a fixed-width left-justified column so all fields line up. */
 .conn-field>span {
     width: 130px;
     flex-shrink: 0;
-    text-align: right;
+    text-align: left;
 }
 
-.conn-field .settings-input,
-.conn-field select {
+.conn-field .settings-input {
     flex: 1;
     min-width: 0;
+}
+
+/* Dropdowns size to their content instead of stretching to the column width. */
+.conn-field select {
+    flex: none;
+    width: auto;
 }
 
 .conn-field textarea.settings-input {
