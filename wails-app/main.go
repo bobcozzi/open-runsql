@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 //go:embed all:frontend/dist
@@ -16,7 +18,9 @@ var assets embed.FS
 var jarFS embed.FS
 
 // resolveJar: honor IBMI_JDBC_BRIDGE_JAR when set; otherwise extract the
-// embedded jar to the user cache dir once and use that path.
+// embedded jar to the user cache dir and use that path. The cached copy is
+// re-extracted whenever it differs from the embedded one, so an app upgrade
+// can never keep running a stale bridge jar.
 func resolveJar() string {
 	if j := os.Getenv("IBMI_JDBC_BRIDGE_JAR"); j != "" {
 		return j
@@ -26,12 +30,12 @@ func resolveJar() string {
 		dir = os.TempDir()
 	}
 	out := filepath.Join(dir, "ibmi-runsql", "ibmi-jdbc-bridge.jar")
-	if _, err := os.Stat(out); err == nil {
-		return out
-	}
 	data, err := jarFS.ReadFile("embed/ibmi-jdbc-bridge.jar")
 	if err != nil {
 		return ""
+	}
+	if existing, err := os.ReadFile(out); err == nil && bytes.Equal(existing, data) {
+		return out
 	}
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return ""
@@ -71,6 +75,15 @@ func main() {
 		MinWidth:         860,
 		MinHeight:        560,
 		BackgroundColour: application.NewRGB(30, 30, 30),
+	})
+	// macOS user close (red button / Cmd+W) only emits WindowShouldClose and
+	// leaves the window open unless the app calls Close() — without this the
+	// process keeps running with no window and relaunches appear to "do
+	// nothing". Close() emits WindowClosing, whose default handler destroys
+	// the window; ApplicationShouldTerminateAfterLastWindowClosed then quits
+	// the app when the last window goes away.
+	window.OnWindowEvent(events.Mac.WindowShouldClose, func(e *application.WindowEvent) {
+		window.Close()
 	})
 	window.Center()
 	window.Show()

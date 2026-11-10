@@ -6,11 +6,11 @@ package bridge
 import (
 	"bufio"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 )
@@ -36,7 +36,25 @@ func Start(javaPath, jarPath string) (*Client, error) {
 		javaPath = "java"
 	}
 	cmd := exec.Command(javaPath, "-jar", jarPath)
-	cmd.Stderr = os.Stderr
+	// Force IPv4: the JVM's default IPv6-mapped sockets on macOS can return
+	// instant EHOSTUNREACH ("No route to host") during scoped-route/Wi-Fi
+	// blips while plain IPv4 processes connect fine.
+	cmd.Args = append([]string{cmd.Args[0], "-Djava.net.preferIPv4Stack=true"}, cmd.Args[1:]...)
+	// Launching via `open` drops the app's stderr, taking the bridge's with
+	// it — JT400's real exception lands nowhere. Tee it to a log file instead,
+	// and tell the bridge where JT400's own Trace output should go.
+	if dir, err := os.UserCacheDir(); err == nil {
+		logPath := filepath.Join(dir, "ibmi-runsql", "bridge-stderr.log")
+		if logFile, err := os.OpenFile(logPath,
+			os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+			cmd.Stderr = logFile
+			cmd.Env = append(os.Environ(), "IBMI_BRIDGE_TRACE_LOG="+logPath)
+		} else {
+			cmd.Stderr = os.Stderr
+		}
+	} else {
+		cmd.Stderr = os.Stderr
+	}
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -121,7 +139,19 @@ func (c *Client) Call(op string, fields map[string]any) (map[string]any, error) 
 	if ok, _ := response["ok"].(bool); !ok {
 		if e, ok := response["error"].(map[string]any); ok {
 			if msg, ok := e["message"].(string); ok {
-				return response, errors.New(msg)
+				detail := ""
+				if et, _ := e["type"].(string); et != "" {
+					detail = " [" + et
+					if ct, _ := e["causeType"].(string); ct != "" {
+						cm, _ := e["causeMessage"].(string)
+						detail += "; cause " + ct + ": " + cm
+					}
+					if hm, _ := e["hostMessages"].(string); hm != "" {
+						detail += "; host: " + hm
+					}
+					detail += "]"
+				}
+				return response, fmt.Errorf("%s%s", msg, detail)
 			}
 		}
 		return response, fmt.Errorf("bridge operation %s failed", op)

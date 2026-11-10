@@ -135,6 +135,7 @@ type SpooledFileRequest struct {
 	User         string `json:"user,omitempty"`
 	AllUsers     bool   `json:"allUsers,omitempty"`
 	AllOutqs     bool   `json:"allOutqs,omitempty"`
+	MaxRows      int    `json:"maxRows,omitempty"` // 0 = unlimited
 }
 
 type SpooledFileInfo struct {
@@ -155,6 +156,7 @@ type SpooledFileInfo struct {
 	Copies         int64  `json:"copies"`
 	Printer        string `json:"printer"`
 	PrinterDevType string `json:"printerDevType"`
+	DeviceType     string `json:"deviceType"`
 	CreatedBy      string `json:"createdBy"`
 	Priority       string `json:"priority"`
 	JobSystem      string `json:"jobSystem"`
@@ -164,6 +166,8 @@ type SpooledFileInfo struct {
 type SpooledFileResult struct {
 	Kind      string            `json:"kind"`
 	Files     []SpooledFileInfo `json:"files"`
+	Truncated bool              `json:"truncated"`
+	Cancelled bool              `json:"cancelled"`
 	OpenMs    int64             `json:"openMs"`
 	IterateMs int64             `json:"iterateMs"`
 	ElapsedMs int64             `json:"elapsedMs"`
@@ -177,6 +181,7 @@ type SpooledFileTarget struct {
 	JobName      string `json:"jobName"`
 	JobUser      string `json:"jobUser"`
 	JobNumber    string `json:"jobNumber"`
+	DeviceType   string `json:"deviceType,omitempty"`
 }
 
 type SpooledFileActionRequest struct {
@@ -186,7 +191,8 @@ type SpooledFileActionRequest struct {
 
 type SpooledFileDataRequest struct {
 	SpooledFileTarget
-	Format string `json:"format"` // text | pdf
+	Format     string `json:"format"`               // text | pdf | raw
+	DeviceType string `json:"deviceType,omitempty"` // from the list row, e.g. *USERASCII
 }
 
 type SpooledFileMoveRequest struct {
@@ -1047,6 +1053,11 @@ func (a *App) DetachConnection(connectionID, title string) error {
 	a.mu.Lock()
 	a.detached[connectionID] = w
 	a.mu.Unlock()
+	// macOS user close only emits WindowShouldClose; call Close() so the
+	// window actually closes (same reasoning as the main window).
+	w.OnWindowEvent(events.Mac.WindowShouldClose, func(e *application.WindowEvent) {
+		w.Close()
+	})
 	w.OnWindowEvent(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		a.mu.Lock()
 		delete(a.detached, connectionID)
@@ -1157,13 +1168,15 @@ func (a *App) ListSpooledFiles(req SpooledFileRequest) (*SpooledFileResult, erro
 		"user":         strings.TrimSpace(req.User),
 		"allUsers":     req.AllUsers,
 		"allOutqs":     req.AllOutqs,
+		"maxRows":      req.MaxRows,
 	})
 	if err != nil {
 		return nil, err
 	}
 	raw, _ := resp["result"].(map[string]any)
 	result := &SpooledFileResult{Kind: str2(raw, "kind"), OpenMs: int64Val(raw["openMs"]),
-		IterateMs: int64Val(raw["iterateMs"]), ElapsedMs: int64Val(raw["elapsedMs"])}
+		IterateMs: int64Val(raw["iterateMs"]), ElapsedMs: int64Val(raw["elapsedMs"]),
+		Truncated: boolVal(raw["truncated"]), Cancelled: boolVal(raw["cancelled"])}
 	for _, f := range anySlice(raw["files"]) {
 		if fm, ok := f.(map[string]any); ok {
 			result.Files = append(result.Files, SpooledFileInfo{
@@ -1174,11 +1187,26 @@ func (a *App) ListSpooledFiles(req SpooledFileRequest) (*SpooledFileResult, erro
 				Pages: int64Val(fm["pages"]), Size: int64Val(fm["size"]),
 				Status: str2(fm, "status"), HoldStatus: str2(fm, "holdStatus"),
 				Copies: int64Val(fm["copies"]), Printer: str2(fm, "printer"), PrinterDevType: str2(fm, "printerDevType"),
-				CreatedBy: str2(fm, "createdBy"), Priority: str2(fm, "priority"), JobSystem: str2(fm, "jobSystem"), Lpi: str2(fm, "lpi"),
+				DeviceType: str2(fm, "deviceType"),
+				CreatedBy:  str2(fm, "createdBy"), Priority: str2(fm, "priority"), JobSystem: str2(fm, "jobSystem"), Lpi: str2(fm, "lpi"),
 			})
 		}
 	}
 	return result, nil
+}
+
+// CancelSpoolList asks the bridge to stop an in-flight spooled-file list for
+// the connection (closes the host open list; best effort).
+func (a *App) CancelSpoolList(connectionID string) error {
+	a.mu.Lock()
+	c := a.client
+	_, known := a.connections[connectionID]
+	a.mu.Unlock()
+	if c == nil || !known {
+		return errors.New("not connected")
+	}
+	_, err := c.Call("cancelSpoolList", map[string]any{"connectionId": connectionID})
+	return err
 }
 
 // spoolTargetParams maps a SpooledFileTarget to bridge call params.
@@ -1186,6 +1214,7 @@ func spoolTargetParams(t SpooledFileTarget) map[string]any {
 	return map[string]any{
 		"connectionId": t.ConnectionID, "name": t.Name, "number": t.Number,
 		"jobName": t.JobName, "jobUser": t.JobUser, "jobNumber": t.JobNumber,
+		"devType": t.DeviceType,
 	}
 }
 

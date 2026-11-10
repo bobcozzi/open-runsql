@@ -75,6 +75,7 @@ export interface SpooledFileRequest {
     user?: string;
     allUsers?: boolean;
     allOutqs?: boolean;
+    maxRows?: number;
 }
 
 export interface SpooledFileInfo {
@@ -95,6 +96,7 @@ export interface SpooledFileInfo {
     copies: number;
     printer: string;
     printerDevType: string;
+    deviceType: string;
     createdBy: string;
     priority: string;
     jobSystem: string;
@@ -104,6 +106,8 @@ export interface SpooledFileInfo {
 export interface SpooledFileResult {
     kind: "spooledFiles";
     files: SpooledFileInfo[];
+    truncated: boolean;
+    cancelled: boolean;
     openMs: number;
     iterateMs: number;
     elapsedMs: number;
@@ -116,6 +120,7 @@ export interface SpooledFileTarget {
     jobName: string;
     jobUser: string;
     jobNumber: string;
+    deviceType?: string;
 }
 
 export interface SpooledFileActionResult {
@@ -182,6 +187,7 @@ export interface AppBinding {
     Fetch(req: { connectionId: string; cursorId: string; fetchSize: number }): Promise<SqlResult>;
     GetCmdXml(req: { connectionId: string; command: string; library?: string }): Promise<CmdXmlResult>;
     ListSpooledFiles(req: SpooledFileRequest): Promise<SpooledFileResult>;
+    CancelSpoolList(connectionId: string): Promise<void>;
     SpooledFileAction(req: SpooledFileTarget & { action: string }): Promise<SpooledFileActionResult>;
     MoveSpooledFile(req: SpooledFileTarget & { toLibrary: string; toQueue: string; holdFirst: boolean }): Promise<SpooledFileActionResult>;
     ListOutputQueues(req: { connectionId: string; nameFilter: string; libraryFilter: string; limit: number }): Promise<OutputQueueListResult>;

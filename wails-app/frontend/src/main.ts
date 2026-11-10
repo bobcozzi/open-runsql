@@ -169,6 +169,14 @@ function closePrompterPanesBelow(depth: number): void {
     }
 }
 
+function syncEmptyState(): void {
+    const anyVisible = els.workArea.querySelector(".work-pane:not([hidden])") != null;
+    // display:none must accompany hidden: .empty-state's display:flex in
+    // style.css outranks the UA [hidden] rule, so hidden alone is not enough.
+    els.emptyState.style.display = anyVisible ? "none" : "";
+    els.emptyState.hidden = anyVisible;
+}
+
 function showPane(name: string): void {
     // Going back to a shallower prompter closes anything nested below it.
     if (name.startsWith("prompter-")) {
@@ -185,8 +193,7 @@ function showPane(name: string): void {
     for (const tab of Array.from(els.workTabs.querySelectorAll<HTMLElement>(".work-tab"))) {
         tab.classList.toggle("active", tab.dataset.pane === name);
     }
-    const anyVisible = els.workArea.querySelector(".work-pane:not([hidden])") != null;
-    els.emptyState.hidden = anyVisible;
+    syncEmptyState();
 }
 
 // --- Spooled Files pane (stage 1: list + filter + sort) ---
@@ -356,12 +363,12 @@ function applyResultsFontSize(px: number): void {
     document.documentElement.style.setProperty("--results-font-size", `${px}px`);
 }
 
-type SpoolTarget = { connectionId: string; name: string; number: string; jobName: string; jobUser: string; jobNumber: string };
+type SpoolTarget = { connectionId: string; name: string; number: string; jobName: string; jobUser: string; jobNumber: string; deviceType?: string };
 
 function spoolTarget(f: SpooledFileInfo): SpoolTarget | null {
     const connectionId = activeTab()?.connectionId ?? "";
     if (!connectionId) return null;
-    return { connectionId, name: f.name, number: f.number, jobName: f.jobName, jobUser: f.jobUser, jobNumber: f.jobNumber };
+    return { connectionId, name: f.name, number: f.number, jobName: f.jobName, jobUser: f.jobUser, jobNumber: f.jobNumber, deviceType: f.deviceType };
 }
 
 /** Download/print file name base: name + job number + splf number, so repeated
@@ -428,6 +435,14 @@ export function renderSpoolText(base64: string): { lines: string[]; pageCount: n
  * base64. No host print transform needed. */
 export function textToPdfBase64(text: string): string {
     return linesToPdfBase64(renderSpoolText(text).lines);
+}
+
+/** True when the raw page-stream bytes are already a PDF document — a
+ * *USERASCII spooled file produced by a PDF-generating tool (InfoPrint,
+ * Transform Services, third-party forms packages). The bytes then pass
+ * through untouched, graphics included, instead of being parsed as SCS. */
+function isUserAsciiPdf(f: SpooledFileInfo, base64: string): boolean {
+    return f.deviceType.toUpperCase() === "*USERASCII" && (base64 ?? "").startsWith("JVBERi0");
 }
 
 /** Build a PDF from pre-rendered spooled text lines ("\f" entries = page
@@ -587,17 +602,23 @@ async function viewSpooledFiles(files: SpooledFileInfo[]): Promise<void> {
     els.statusText.textContent = "";
 }
 
-/** Save the raw page-stream bytes (no rendering) to ~/Downloads for SCS
- * debugging. format="raw" skips the bridge CCSID decode. */
+/** Download the raw spooled bytes (no rendering) to ~/Downloads. Extension by
+ * data stream: .afp for *AFPDS, .pdf when the payload is already a PDF
+ * (*USERASCII), .raw otherwise. format="raw" skips the bridge CCSID decode. */
 async function saveRawSpooledFile(f: SpooledFileInfo, openAfter = true, idx = 0, total = 1): Promise<void> {
     const app = App();
     const target = spoolTarget(f);
     if (!app || !target) return;
-    appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logRaw", "Save raw {name}...").replace("{name}", f.name)}`, "msg-action");
+    appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logRaw", "Download raw {name}...").replace("{name}", f.name)}`, "msg-action");
     if (total > 1) setSpoolBusyProgress(f.name, idx + 1, total); else setSpoolBusy(f.name);
     try {
         const res = await app.GetSpooledFileData({ ...target, format: "raw" });
-        const saved = await app.SaveSpooledFile(`${spoolFileBaseName(f)}.raw`, res.base64 ?? "");
+        const b64 = res.base64 ?? "";
+        const dt = (f.deviceType ?? "").toUpperCase().trim();
+        const ext = dt === "*AFPDS" ? "afp"
+            : dt === "*USERASCII" && b64.startsWith("JVBERi0") ? "pdf"
+                : "raw";
+        const saved = await app.SaveSpooledFile(`${spoolFileBaseName(f)}.${ext}`, b64);
         appendLogLine(t("spool.logSaved", "Saved to {path}").replace("{path}", saved), "msg-info", true);
         els.statusText.textContent = t("spool.statusSaved", "Saved {path}").replace("{path}", saved);
         if (openAfter) await app.OpenSpooledFile(saved);
@@ -624,8 +645,8 @@ async function downloadSpooledFile(f: SpooledFileInfo, format: "pdf" | "text", o
     try {
         let base64: string;
         if (format === "pdf") {
-            // Build the PDF client-side from the decoded text — no host print
-            // transform needed.
+            // SCS text → client-rendered PDF (non-SCS types don't reach here:
+            // their menu only offers Download Raw).
             const textRes = await app.GetSpooledFileData({ ...target, format: "raw" });
             base64 = textToPdfBase64(textRes.base64 ?? "");
         } else {
@@ -891,25 +912,34 @@ function showSpoolContextMenu(f: SpooledFileInfo, x: number, y: number, selected
     // The right-clicked row is always part of the selection (pane guarantees
     // it); actions apply to the whole selection.
     const targets = selected.length > 0 ? selected : [f];
-    addItem(t("spool.act.view", "View"), () => void viewSpooledFiles(targets));
-    addItem(t("spool.act.copyRow", "Copy row"), () => {
-        const text = targets.map((g) => [g.name, g.number, g.jobName, g.jobUser, g.jobNumber, g.userData,
-        (g.outqLib || g.outqName ? `${g.outqLib}/${g.outqName}` : ""),
-        `${g.createDate} ${g.createTime}`.trim(), String(g.pages), String(g.size),
-        g.status, g.holdStatus].join("\t")).join("\n");
-        // navigator.clipboard needs a secure context; fall back to execCommand.
-        const done = () => appendLogLine(t("spool.logCopied", "Copied row to clipboard"), "msg-info", true);
-        if (navigator.clipboard?.writeText) {
-            navigator.clipboard.writeText(text).then(done).catch(() => { legacyCopy(text); done(); });
-        } else {
-            legacyCopy(text);
-            done();
-        }
+    // Data-stream-aware menu: *SCS (or unknown) is text-renderable —
+    // View/Text/PDF/Print. Everything else (*USERASCII, *AFPDS, ...) is a
+    // binary payload: only Download Raw applies.
+    const allScs = targets.every((g) => {
+        const dt = (g.deviceType ?? "").toUpperCase().trim();
+        return dt === "" || dt === "*SCS";
     });
-    addItem(t("spool.act.dlPdf", "Download as PDF"), () => void downloadSpooledFiles(targets, "pdf"));
-    addItem(t("spool.act.dlText", "Download as Text"), () => void downloadSpooledFiles(targets, "text"));
-    addItem(t("spool.act.saveRaw", "Save Raw"), () => void saveRawSpooledFiles(targets));
-    addItem(t("spool.act.print", "Print locally"), () => void printSpooledFiles(targets));
+    if (allScs) {
+        addItem(t("spool.act.view", "View"), () => void viewSpooledFiles(targets));
+        addItem(t("spool.act.copyRow", "Copy row"), () => {
+            const text = targets.map((g) => [g.name, g.number, g.jobName, g.jobUser, g.jobNumber, g.userData,
+            (g.outqLib || g.outqName ? `${g.outqLib}/${g.outqName}` : ""),
+            `${g.createDate} ${g.createTime}`.trim(), String(g.pages), String(g.size),
+            g.status, g.holdStatus].join("\t")).join("\n");
+            // navigator.clipboard needs a secure context; fall back to execCommand.
+            const done = () => appendLogLine(t("spool.logCopied", "Copied row to clipboard"), "msg-info", true);
+            if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(text).then(done).catch(() => { legacyCopy(text); done(); });
+            } else {
+                legacyCopy(text);
+                done();
+            }
+        });
+        addItem(t("spool.act.dlPdf", "Download as PDF"), () => void downloadSpooledFiles(targets, "pdf"));
+        addItem(t("spool.act.dlText", "Download as Text"), () => void downloadSpooledFiles(targets, "text"));
+        addItem(t("spool.act.print", "Print locally"), () => void printSpooledFiles(targets));
+    }
+    addItem(t("spool.act.saveRaw", "Download Raw"), () => void saveRawSpooledFiles(targets));
     sep();
     addItem(t("spool.act.move", "Move..."), () => moveSpooledFilesDialog(targets));
     addItem(t("spool.act.hold", "Hold"), () => void spoolActions(targets, "hold"));
@@ -924,6 +954,13 @@ function showSpoolContextMenu(f: SpooledFileInfo, x: number, y: number, selected
             : t("spool.confirmDelete", "Delete spooled file {name}?").replace("{name}", f.name);
         if (window.confirm(msg)) void spoolActions(targets, "delete");
     }, true);
+    // Clamp inside the viewport — right-clicking a right-most column near
+    // the window's right/bottom edge would otherwise clip the menu.
+    requestAnimationFrame(() => {
+        const rect = menu.getBoundingClientRect();
+        if (x + rect.width > window.innerWidth) menu.style.left = `${Math.max(4, window.innerWidth - rect.width - 4)}px`;
+        if (y + rect.height > window.innerHeight) menu.style.top = `${Math.max(4, window.innerHeight - rect.height - 4)}px`;
+    });
     document.body.appendChild(menu);
     contextMenuEl = menu;
 }
@@ -936,14 +973,18 @@ async function refreshSpool(filters: SpoolFilters): Promise<void> {
         return;
     }
     spool.setBusy(true);
+    els.btnCancel.disabled = false;
     const started = performance.now();
     appendLogLine(`[ ${nowStamp()} ]  ${t("spool.logList", "List Spooled Files...")}`, "msg-action");
     try {
-        const result = await app.ListSpooledFiles(buildSpooledFileRequest(connectionId, filters));
         const cap = spoolMaxRowsSetting();
-        const rows = result.files ?? [];
-        const truncated = cap > 0 && rows.length > cap;
-        const files = truncated ? rows.slice(0, cap) : rows;
+        const req = buildSpooledFileRequest(connectionId, filters);
+        // The cap goes to the bridge: enumeration stops at maxRows and the
+        // host open list closes, so giant queues never hit the 16MB
+        // user-space limit ("list is too large for user space").
+        req.maxRows = cap;
+        const result = await app.ListSpooledFiles(req);
+        const files = result.files ?? [];
         const count = files.length;
         const renderStart = performance.now();
         spool.setFiles(files);
@@ -954,7 +995,8 @@ async function refreshSpool(filters: SpoolFilters): Promise<void> {
             + t("spool.logTiming", "(open {open} ms, fetch {fetch} ms, render {render} ms)")
                 .replace("{open}", String(result.openMs)).replace("{fetch}", String(result.iterateMs))
                 .replace("{render}", String(renderMs))
-            + (truncated ? " " + t("spool.logCapped", "(capped at {cap} by Settings)").replace("{cap}", String(cap)) : ""), "msg-info", true);
+            + (result.cancelled ? " " + t("spool.logCancelled", "(cancelled)")
+                : result.truncated ? " " + t("spool.logCapped", "(capped at {cap} by Settings)").replace("{cap}", String(cap)) : ""), "msg-info", true);
         els.statusText.textContent = t("spool.statusCount", "{count} spooled file(s) in {ms} ms")
             .replace("{count}", String(count)).replace("{ms}", String(result.elapsedMs));
     } catch (err) {
@@ -963,6 +1005,8 @@ async function refreshSpool(filters: SpoolFilters): Promise<void> {
         showMessages([], String((err as Error)?.message ?? err));
     } finally {
         spool.setBusy(false);
+        // Only re-disable Cancel when nothing else is running.
+        if (!state.running) els.btnCancel.disabled = true;
     }
 }
 
@@ -1043,6 +1087,9 @@ interface ResultSnapshot {
     messagesHtml: string;
     messagesVisible: boolean;
     showingResults: boolean;
+    // Work pane the tab was last showing (results/messages/spool/...) —
+    // restored on tab switch so e.g. Spooled Files stays put.
+    activePane?: string;
     // Quick Connect form state (per-tab).
     connForm?: {
         host: string; user: string; password: string; schema: string;
@@ -1157,6 +1204,7 @@ function snapshotActiveTab(): void {
         messagesHtml: els.messageList.innerHTML,
         messagesVisible: els.messageList.children.length > 0,
         showingResults: els.resultBody.children.length > 0 || els.resultHead.children.length > 0,
+        activePane,
         connForm: {
             host: el<HTMLInputElement>("in-host").value,
             user: el<HTMLInputElement>("in-user").value,
@@ -1178,19 +1226,26 @@ function restoreActiveTab(): void {
     state.sortCol = -1;
     state.sortDir = 1;
     els.sqlInput.value = snap?.editorText ?? "";
+    // Restore the pane the tab was last showing (defaults to Results);
+    // otherwise switching away from Spooled Files and back jumps to Results.
+    const pane = snap?.activePane ?? "results";
     if (snap?.showingResults) {
         renderTable();
         els.statusText.textContent = snap.statusText;
         els.btnLoadMore.hidden = !state.more;
         els.btnLoadAll.hidden = !state.more;
-        showPane("results");
     } else {
         els.resultHead.innerHTML = "";
         els.resultBody.innerHTML = "";
         els.statusText.textContent = "";
         els.btnLoadMore.hidden = true;
         els.btnLoadAll.hidden = true;
-        showPane("results");
+    }
+    showPane(pane);
+    // Spooled Files: refresh when the visible list belongs to a different
+    // connection (mirrors the work-tab click handler's stale reload).
+    if (pane === "spool" && spoolState.loadedFor !== (activeTab()?.connectionId ?? "")) {
+        void refreshSpool(spool.filters());
     }
     els.messageList.innerHTML = snap?.messagesHtml ?? "";
     closeAllPrompterPanes();
@@ -1342,6 +1397,10 @@ function syncConnectionUi(): void {
         : t("main.notConnected", "Not connected");
     els.badge.className = `badge ${connected ? "connected" : "disconnected"}`;
     els.btnConnect.disabled = connected;
+    // GO mirrors Connect: enabled when a saved profile was picked and this
+    // tab is not connected (re-arms after a failed connect or disconnect).
+    const goBtn = document.getElementById("btn-go") as HTMLButtonElement | null;
+    if (goBtn) goBtn.disabled = connected || !goBtn.dataset.armed;
     els.btnDisconnect.disabled = !connected;
     els.btnRun.disabled = !connected;
     els.btnRunAll.disabled = !connected;
@@ -1357,6 +1416,9 @@ function syncConnectionUi(): void {
         const alwaysAvailable = p.dataset.pane === "connections" || p.dataset.pane === "settings";
         p.hidden = connected ? p.dataset.pane !== activePane : !(alwaysAvailable && p.dataset.pane === activePane);
     });
+    // Connect/disconnect changes pane visibility without going through
+    // showPane — keep the splash in sync or it stacks above the pane.
+    syncEmptyState();
     el<HTMLDivElement>("splitter").hidden = !connected;
     el<HTMLSpanElement>("run-controls").hidden = !connected;
     document.querySelector<HTMLElement>(".editor-wrap")!.hidden = !connected;
@@ -1751,6 +1813,9 @@ async function doConnect(): Promise<void> {
         }
     } catch (err) {
         els.btnConnect.disabled = false;
+        // Failed connect: re-arm GO so it can be pressed again immediately.
+        const go = document.getElementById("btn-go") as HTMLButtonElement | null;
+        if (go?.dataset.armed) go.disabled = false;
         els.connectError.textContent = String((err as Error)?.message ?? err);
         els.connectError.hidden = false;
         // Connect failures must be visible: open Messages with the error.
@@ -2051,9 +2116,16 @@ async function doFetch(all: boolean): Promise<void> {
 
 async function doCancel(): Promise<void> {
     const app = App();
-    if (!app || !activeTab()?.connectionId) return;
+    const connId = activeTab()?.connectionId;
+    if (!app || !connId) return;
     try {
-        await app.CancelSQL(activeTab()?.connectionId ?? "");
+        await app.CancelSQL(connId);
+    } catch {
+        // best effort
+    }
+    // Also stop any in-flight spooled-file list on this connection.
+    try {
+        await app.CancelSpoolList(connId);
     } catch {
         // best effort
     }
@@ -2391,7 +2463,10 @@ el<HTMLInputElement>("in-password").addEventListener("keydown", (ev: KeyboardEve
 ["in-host", "in-user", "in-password"].forEach((id) => {
     document.getElementById(id)?.addEventListener("input", () => {
         const go = document.getElementById("btn-go") as HTMLButtonElement | null;
-        if (go) go.disabled = true;
+        if (go) {
+            delete go.dataset.armed;
+            go.disabled = true;
+        }
     });
 });
 
@@ -2487,7 +2562,10 @@ function renderSavedHosts(filter = ""): void {
             popup.hidden = true;
             // Enable the quick-connect GO button for the selected profile.
             const go = document.getElementById("btn-go") as HTMLButtonElement | null;
-            if (go) go.disabled = false;
+            if (go && !activeTab()?.connectionId) {
+                go.dataset.armed = "1";
+                go.disabled = false;
+            }
         });
         popup.appendChild(item);
     };

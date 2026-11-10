@@ -49,6 +49,16 @@ export function CancelSQL(connectionID) {
 }
 
 /**
+ * CancelSpoolList asks the bridge to stop an in-flight spooled-file list for
+ * the connection (closes the host open list; best effort).
+ * @param {string} connectionID
+ * @returns {$CancellablePromise<void>}
+ */
+export function CancelSpoolList(connectionID) {
+    return $Call.ByID(1927110618, connectionID);
+}
+
+/**
  * Connect opens a new JDBC connection to the IBM i.
  * @param {$models.ConnectRequest} req
  * @returns {$CancellablePromise<$models.ConnectResponse | null>}

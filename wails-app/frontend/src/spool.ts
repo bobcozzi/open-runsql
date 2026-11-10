@@ -39,7 +39,7 @@ export function buildSpooledFileRequest(connectionId: string, f: SpoolFilters): 
 export type SpoolSortKey =
     | "name" | "number" | "job" | "userData"
     | "outq" | "created" | "pages" | "size" | "status" | "holdStatus"
-    | "copies" | "printer" | "printerDevType"
+    | "copies" | "printer" | "deviceType"
     | "createdBy" | "priority" | "jobSystem" | "lpi";
 
 interface SpoolColumn {
@@ -59,7 +59,7 @@ export const SPOOL_COLUMNS: SpoolColumn[] = [
     { key: "pages", labelKey: "spool.col.pages", fallback: "Pages", numeric: true },
     { key: "copies", labelKey: "spool.col.copies", fallback: "Copies", numeric: true },
     { key: "printer", labelKey: "spool.col.printer", fallback: "Printer" },
-    { key: "printerDevType", labelKey: "spool.col.printerDevType", fallback: "Device Type" },
+    { key: "deviceType", labelKey: "spool.col.deviceType", fallback: "Data Stream" },
     { key: "createdBy", labelKey: "spool.col.createdBy", fallback: "Created By" },
     { key: "priority", labelKey: "spool.col.priority", fallback: "Pty", numeric: true },
     { key: "jobSystem", labelKey: "spool.col.jobSystem", fallback: "System" },
@@ -313,11 +313,6 @@ export function createSpoolPane(opts: SpoolPaneOptions): SpoolPaneHandle {
             });
             headRow.appendChild(th);
         }
-        // Stage 2+ placeholder: viewer/download/hold/move/delete actions.
-        const actionsTh = document.createElement("th");
-        actionsTh.className = "spool-actions";
-        actionsTh.textContent = t("spool.col.actions", "Actions");
-        headRow.appendChild(actionsTh);
         thead.appendChild(headRow);
     }
 
@@ -349,9 +344,6 @@ export function createSpoolPane(opts: SpoolPaneOptions): SpoolPaneHandle {
                 if (col.numeric) td.classList.add("num");
                 tr.appendChild(td);
             }
-            const actionsTd = document.createElement("td");
-            actionsTd.className = "spool-actions";
-            tr.appendChild(actionsTd);
             if (selection.has(f)) tr.classList.add("spool-selected");
             tr.addEventListener("dblclick", () => opts.onRowOpen?.(f));
             // Row highlight only on a clean click (no drag). A left-button

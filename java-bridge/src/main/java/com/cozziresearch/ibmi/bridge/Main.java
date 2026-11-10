@@ -8,7 +8,9 @@ import com.ibm.as400.access.AS400;
 import com.ibm.as400.access.AS400Message;
 import com.ibm.as400.access.Command;
 import com.ibm.as400.access.CommandCall;
+import com.ibm.as400.access.ErrorCompletingRequestException;
 import com.ibm.as400.access.PrintObject;
+import com.ibm.as400.access.PrintObjectInputStream;
 import com.ibm.as400.access.PrintObjectPageInputStream;
 import com.ibm.as400.access.PrintObjectTransformedInputStream;
 import com.ibm.as400.access.PrintParameterList;
@@ -38,6 +40,14 @@ public final class Main {
 
     public static void main(String[] args) throws Exception {
         Class.forName("com.ibm.as400.access.AS400JDBCDriver");
+        // JT400 trace: writes to its own PrintWriter, not stderr — point it at
+        // the bridge log file so NP-server return codes are captured.
+        String traceLog = System.getenv("IBMI_BRIDGE_TRACE_LOG");
+        if (traceLog != null && !traceLog.isBlank()) {
+            com.ibm.as400.access.Trace.setFileName(traceLog);
+            com.ibm.as400.access.Trace.setTraceErrorOn(true);
+            com.ibm.as400.access.Trace.setTraceDiagnosticOn(true);
+        }
         try (BufferedReader in = new BufferedReader(
                 new InputStreamReader(System.in, StandardCharsets.UTF_8))) {
             String line;
@@ -87,7 +97,11 @@ public final class Main {
 
                 String url = "jdbc:as400://" + host + ";prompt=false;naming=" + naming
                         // Extended metadata: resolve column headings/labels fully.
-                        + ";extended metadata=true;metadata source=-1";
+                        + ";extended metadata=true;metadata source=-1"
+                        // Socket-level connect timeout so a dead path fails fast
+                        // with the real error instead of a wrapped generic one;
+                        // keep-alive lets healthy sessions ride out Wi-Fi blips.
+                        + ";socket timeout=15000;keep alive=true";
                 if (tls) url += ";secure=true";
 
                 Properties props = new Properties();
@@ -96,7 +110,24 @@ public final class Main {
                 int timeout = r.path("timeoutSeconds").asInt(30);
                 DriverManager.setLoginTimeout(Math.max(1, timeout));
 
-                Connection c = DriverManager.getConnection(url, props);
+                // Resolve first so DNS/lookup failures surface as the real
+                // cause (UnknownHostException) rather than JT400's generic
+                // "cannot establish the connection" wrapper.
+                java.net.InetAddress.getByName(host);
+
+                Connection c;
+                try {
+                    c = DriverManager.getConnection(url, props);
+                } catch (SQLException first) {
+                    // macOS can hand a transient EHOSTUNREACH to a socket created
+                    // while a route/Wi-Fi flap is settling. One short retry rides
+                    // it out — the kernel route cache has converged by then.
+                    if (!isTransientConnectError(first)) throw first;
+                    try { Thread.sleep(250); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    }
+                    c = DriverManager.getConnection(url, props);
+                }
                 c.setAutoCommit(true);
 
                 String schema = text(r, "defaultSchema", "");
@@ -112,6 +143,11 @@ public final class Main {
                         ? new SecureAS400(host, user, passwordChars)
                         : new AS400(host, user, passwordChars);
                 clSystem.setGuiAvailable(false);
+                // Same socket hardening for the CL/print services connection.
+                com.ibm.as400.access.SocketProperties sp = clSystem.getSocketProperties();
+                sp.setSoTimeout(15000);
+                sp.setKeepAlive(true);
+                clSystem.setSocketProperties(sp);
                 Session s = new Session(c, clSystem);
                 SESSIONS.put(connectionId, s);
                 out.put("connectionId", connectionId);
@@ -160,7 +196,17 @@ public final class Main {
                 Session s = session(r);
                 out.set("result", listSpooledFiles(s,
                         text(r, "outqLib", ""), text(r, "outq", ""), text(r, "user", ""),
-                        r.path("allUsers").asBoolean(false), r.path("allOutqs").asBoolean(false)));
+                        r.path("allUsers").asBoolean(false), r.path("allOutqs").asBoolean(false),
+                        r.path("maxRows").asInt(0)));
+            }
+            case "cancelSpoolList" -> {
+                Session s = session(r);
+                SpooledFileList active = s.activeSpoolList;
+                if (active != null) {
+                    s.spoolListCancelled = true;
+                    try { active.close(); } catch (Exception ignored) {}
+                    out.put("cancelRequested", true);
+                } else out.put("cancelRequested", false);
             }
             case "spooledFileAction" -> {
                 Session s = session(r);
@@ -172,7 +218,7 @@ public final class Main {
                 Session s = session(r);
                 out.set("result", getSpooledFileData(s, text(r, "format", "text"),
                         required(r, "name"), required(r, "number"), required(r, "jobName"),
-                        required(r, "jobUser"), required(r, "jobNumber")));
+                        required(r, "jobUser"), required(r, "jobNumber"), text(r, "devType", "")));
             }
             case "moveSpooledFile" -> {
                 Session s = session(r);
@@ -365,16 +411,19 @@ public final class Main {
     }
 
     private static ObjectNode listSpooledFiles(Session s, String outqLib, String outq,
-            String user, boolean allUsers, boolean allOutqs) throws Exception {
+            String user, boolean allUsers, boolean allOutqs, int maxRows) throws Exception {
         long started = System.nanoTime();
         // clSystem ops (executeCL/getCmdXml) do not take s.lock; the print
         // service is independent of the JDBC connection. Output-queue-not-found
         // and authority failures propagate to handleLine -> ok:false with the
         // host message text (shown in the frontend Messages pane).
         SpooledFileList list = new SpooledFileList(s.clSystem);
+        s.activeSpoolList = list;
+        s.spoolListCancelled = false;
         ArrayNode files = JSON.createArrayNode();
         long openMs = 0;
         long iterateMs = 0;
+        boolean truncated = false;
         try {
             list.setUserFilter(allUsers ? "*ALL"
                     : (user == null || user.isBlank() ? "*CURRENT" : user.trim().toUpperCase(Locale.ROOT)));
@@ -396,14 +445,19 @@ public final class Main {
                     PrintObject.ATTR_SPLF_SIZE_MULT, PrintObject.ATTR_SPLFSTATUS,
                     PrintObject.ATTR_HOLD, PrintObject.ATTR_COPIES,
                     PrintObject.ATTR_PRINTER, PrintObject.ATTR_PRTDEVTYPE,
-                    PrintObject.ATTR_TOUSERID, PrintObject.ATTR_OUTPTY,
+                    PrintObject.ATTR_DEVTYPE, PrintObject.ATTR_TOUSERID, PrintObject.ATTR_OUTPTY,
                     PrintObject.ATTR_JOBSYSTEM, PrintObject.ATTR_LPI });
             long openStart = System.nanoTime();
             list.openSynchronously();
             openMs = (System.nanoTime() - openStart) / 1_000_000L;
             long iterStart = System.nanoTime();
             Enumeration<SpooledFile> e = list.getObjects();
-            while (e.hasMoreElements()) {
+            // maxRows > 0 stops enumeration at the cap and closes the list —
+            // the host open-list then stops producing, so giant queues never
+            // fill the 16MB user space ("list is too large for user space").
+            while (e.hasMoreElements()
+                    && !(maxRows > 0 && files.size() >= maxRows)
+                    && !s.spoolListCancelled) {
                 SpooledFile f = e.nextElement();
                 ObjectNode file = JSON.createObjectNode();
                 file.put("name", splfStr(f::getName));
@@ -429,6 +483,10 @@ public final class Main {
                 file.put("copies", splfLong(() -> f.getIntegerAttribute(PrintObject.ATTR_COPIES)));
                 file.put("printer", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_PRINTER)));
                 file.put("printerDevType", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_PRTDEVTYPE)));
+                // Data stream type: *SCS / *AFPDS / *USERASCII / ... — this
+                // is ATTR_PRTDEVTYPE (what WRKSPLF shows as the printer file
+                // device type). ATTR_DEVTYPE is only PRINTER/DISKETTE intent.
+                file.put("deviceType", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_PRTDEVTYPE)));
                 // "Created by" = TOUSERID when set, else the job's user.
                 String createdBy = splfStr(() -> f.getStringAttribute(PrintObject.ATTR_TOUSERID));
                 if (createdBy.isEmpty()) createdBy = splfStr(f::getJobUser);
@@ -438,13 +496,17 @@ public final class Main {
                 file.put("lpi", splfStr(() -> f.getStringAttribute(PrintObject.ATTR_LPI)));
                 files.add(file);
             }
+            truncated = maxRows > 0 && files.size() >= maxRows && e.hasMoreElements();
             iterateMs = (System.nanoTime() - iterStart) / 1_000_000L;
         } finally {
             try { list.close(); } catch (Exception ignored) {}
+            s.activeSpoolList = null;
         }
         ObjectNode result = JSON.createObjectNode();
         result.put("kind", "spooledFiles");
         result.set("files", files);
+        result.put("truncated", truncated);
+        result.put("cancelled", s.spoolListCancelled);
         result.put("openMs", openMs);
         result.put("iterateMs", iterateMs);
         result.put("elapsedMs", elapsedMs(started));
@@ -593,14 +655,74 @@ public final class Main {
     /** Read a spooled file's content: raw text bytes or PDF transform,
         base64-encoded for the JSON-lines protocol. */
     private static ObjectNode getSpooledFileData(Session s, String format, String name,
-            String number, String jobName, String jobUser, String jobNumber) throws Exception {
+            String number, String jobName, String jobUser, String jobNumber, String devType) throws Exception {
         long started = System.nanoTime();
         SpooledFileList list = newListForUser(s.clSystem, jobUser);
         byte[] bytes;
         try {
             SpooledFile f = findSpooledFile(list, name, number, jobName, jobUser, jobNumber);
             if (f == null) throw new IllegalStateException("Spooled file not found: " + name);
-            if ("pdf".equalsIgnoreCase(format)) {
+            // Identity + status diagnostics: same object that read attributes
+            // from the list, no reconstruction.
+            String dt = devType.trim();
+            if (dt.isEmpty()) {
+                try { dt = nullToEmpty(f.getStringAttribute(PrintObject.ATTR_PRTDEVTYPE)).trim(); }
+                catch (Throwable ignored) {}
+            }
+            System.err.println("[spool] name=" + f.getName() + " nbr=" + f.getNumber()
+                    + " job=" + f.getJobNumber() + "/" + f.getJobUser() + "/" + f.getJobName()
+                    + " status=" + safeAttr(f, PrintObject.ATTR_SPLFSTATUS)
+                    + " devType=" + dt + " format=" + format);
+            if ("*USERASCII".equalsIgnoreCase(dt) || "*AFPDS".equalsIgnoreCase(dt)) {
+                // No-arg getInputStream(): an empty PrintParameterList still
+                // alters the NP-server open request.
+                PrintObjectInputStream in = f.getInputStream();
+                try {
+                    bytes = in.readAllBytes();
+                } catch (Exception readErr) {
+                    // The ECRE is stringified into the IOException message, not
+                    // chained as a cause. The host's CPF message sits on the
+                    // stream impl's cpCPFMsg_ code point — dig it out via
+                    // reflection and log id/text.
+                    try {
+                        // impl_ is private on PrintObjectInputStream itself.
+                        java.lang.reflect.Field implF = in.getClass().getDeclaredField("impl_");
+                        implF.setAccessible(true);
+                        Object impl = implF.get(in);
+                        java.lang.reflect.Field cpF = impl.getClass().getDeclaredField("cpCPFMsg_");
+                        cpF.setAccessible(true);
+                        Object cp = cpF.get(impl);
+                        if (cp != null) {
+                            // getStringValue(int) is package-private on the
+                            // NPCPAttributeValue parent — find it up the chain.
+                            Class<?> cls = cp.getClass();
+                            java.lang.reflect.Method getter = null;
+                            while (cls != null && getter == null) {
+                                try {
+                                    getter = cls.getDeclaredMethod("getStringValue", int.class);
+                                } catch (NoSuchMethodException e) {
+                                    cls = cls.getSuperclass();
+                                }
+                            }
+                            if (getter != null) {
+                                getter.setAccessible(true);
+                                Object msgId = getter.invoke(cp, PrintObject.ATTR_MSGID);
+                                Object msgText = getter.invoke(cp, PrintObject.ATTR_MSGTEXT);
+                                System.err.println("[spool] host CPF message: " + msgId + " " + msgText);
+                            } else {
+                                System.err.println("[spool] getStringValue not found on " + cp.getClass());
+                            }
+                        } else {
+                            System.err.println("[spool] no CPF message on stream impl");
+                        }
+                    } catch (Throwable refErr) {
+                        System.err.println("[spool] reflection dig failed: " + refErr);
+                    }
+                    in.close();
+                    throw readErr;
+                }
+                in.close();
+            } else if ("pdf".equalsIgnoreCase(format)) {
                 // PDF via host print transform: *WSCST + the default customization
                 // object. Requires the host transform services; if the result isn't
                 // %PDF the frontend shows the transform error instead of a file.
@@ -612,8 +734,11 @@ public final class Main {
                 }
             } else if ("raw".equalsIgnoreCase(format)) {
                 // Raw page-stream bytes, no CCSID decode — for SCS debugging.
-                java.io.ByteArrayOutputStream rawBytes = new java.io.ByteArrayOutputStream();
+                // Some devtypes (*USERASCII, certain *AFPDS) have no page
+                // framing on the host; when the page stream open fails, fall
+                // back to the plain byte stream so the data still comes down.
                 try (PrintObjectPageInputStream in = f.getPageInputStream(new PrintParameterList())) {
+                    java.io.ByteArrayOutputStream rawBytes = new java.io.ByteArrayOutputStream();
                     byte[] buf = new byte[8192];
                     int n;
                     do {
@@ -621,8 +746,16 @@ public final class Main {
                             rawBytes.write(buf, 0, n);
                         }
                     } while (in.nextPage());
+                    bytes = rawBytes.toByteArray();
+                } catch (ErrorCompletingRequestException pageErr) {
+                    System.err.println("[spool] " + name + " page stream failed ("
+                            + pageErr.getMessage() + "); retrying with plain stream");
+                    // No-arg getInputStream(): an empty PrintParameterList
+                    // still alters the NP-server open request.
+                    try (PrintObjectInputStream in = f.getInputStream()) {
+                        bytes = in.readAllBytes();
+                    }
                 }
-                bytes = rawBytes.toByteArray();
             } else {
                 // Page stream: decoded text + per-record SCS column framing.
                 // Decode with the spooled file's job CCSID (EBCDIC 037 etc.)
@@ -823,7 +956,21 @@ public final class Main {
         return n;
     }
 
+    /** True when a connect failure is a transient local socket condition
+     * (EHOSTUNREACH/ECONNRESET during route/Wi-Fi settling) worth one retry. */
+    private static boolean isTransientConnectError(SQLException e) {
+        Throwable c = e;
+        while (c != null) {
+            if (c instanceof java.net.NoRouteToHostException
+                    || c instanceof java.net.SocketException) return true;
+            c = c.getCause();
+        }
+        return false;
+    }
+
     private static ObjectNode errorNode(Throwable t) {
+        // Full stack to the stderr log file for post-mortem debugging.
+        t.printStackTrace();
         ObjectNode n = JSON.createObjectNode();
         if (t instanceof SQLException e) {
             n.put("type", "SQLException");
@@ -831,6 +978,32 @@ public final class Main {
             n.put("vendorCode", e.getErrorCode());
         } else n.put("type", t.getClass().getSimpleName());
         n.put("message", nullToEmpty(t.getMessage()));
+        // JT400 wraps socket failures in AS400Exception/JDError with the real
+        // cause underneath — expose the chain so the UI can show it.
+        Throwable cause = t.getCause();
+        if (cause != null) {
+            n.put("causeType", cause.getClass().getSimpleName());
+            n.put("causeMessage", nullToEmpty(cause.getMessage()));
+        }
+        // Host-side failures (ErrorCompletingRequestException & co.) carry the
+        // IBM i message list (CPF/CPD ids + text) on the AS400Exception base,
+        // and a numeric return code — both may be buried under wrappers like
+        // IOException, so walk the whole cause chain.
+        StringBuilder msgs = new StringBuilder();
+        Integer returnCode = null;
+        for (Throwable c = t; c != null; c = c.getCause()) {
+            if (c instanceof com.ibm.as400.access.AS400Exception ae) {
+                for (AS400Message m : ae.getAS400MessageList()) {
+                    if (msgs.length() > 0) msgs.append(" | ");
+                    msgs.append(m.getID()).append(": ").append(m.getText());
+                }
+            }
+            if (returnCode == null && c instanceof com.ibm.as400.access.ReturnCodeException rce) {
+                returnCode = rce.getReturnCode();
+            }
+        }
+        if (msgs.length() > 0) n.put("hostMessages", msgs.toString());
+        if (returnCode != null) n.put("returnCode", returnCode);
         return n;
     }
 
@@ -862,6 +1035,11 @@ public final class Main {
                 try { s.activeStatement.close(); } catch (Exception ignored) {}
                 s.activeStatement = null;
             }
+            if (s.activeSpoolList != null) {
+                s.spoolListCancelled = true;
+                try { s.activeSpoolList.close(); } catch (Exception ignored) {}
+                s.activeSpoolList = null;
+            }
             try { s.connection.close(); } catch (Exception ignored) {}
             try { s.clSystem.disconnectAllServices(); } catch (Exception ignored) {}
         } finally { s.lock.unlock(); }
@@ -883,6 +1061,16 @@ public final class Main {
     }
     private static String quoteIdentifier(String s) { return "\"" + s.replace("\"", "\"\"") + "\""; }
     private static String nullToEmpty(String s) { return s == null ? "" : s; }
+
+    /** Attribute read that never throws — returns "" on any failure. */
+    private static String safeAttr(PrintObject o, int attr) {
+        try {
+            Object v = o.getStringAttribute(attr);
+            return v == null ? "" : String.valueOf(v).trim();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
     private static int clampFetch(int n) { return Math.max(1, Math.min(n, 5000)); }
     private static long elapsedMs(long start) { return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start); }
 
@@ -903,6 +1091,10 @@ public final class Main {
         final ReentrantLock lock = new ReentrantLock();
         final Map<String, Cursor> cursors = new ConcurrentHashMap<>();
         volatile Statement activeStatement;
+        // In-flight spooled-file list: closed by cancelSpoolList/closeSession
+        // so the host stops producing into the open-list user space.
+        volatile SpooledFileList activeSpoolList;
+        volatile boolean spoolListCancelled;
         Session(Connection c, AS400 clSystem) { connection = c; this.clSystem = clSystem; }
     }
     private static final class Cursor {

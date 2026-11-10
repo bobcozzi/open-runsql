@@ -876,6 +876,13 @@ export class SpooledFileActionRequest {
              */
             this["jobNumber"] = "";
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["deviceType"] = undefined;
+        }
         if (!("action" in $$source)) {
             /**
              * hold | release | delete
@@ -991,11 +998,19 @@ export class SpooledFileDataRequest {
         }
         if (!("format" in $$source)) {
             /**
-             * text | pdf
+             * text | pdf | raw
              * @member
              * @type {string}
              */
             this["format"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * from the list row, e.g. *USERASCII
+             * @member
+             * @type {string | undefined}
+             */
+            this["deviceType"] = undefined;
         }
 
         Object.assign(this, $$source);
@@ -1193,6 +1208,13 @@ export class SpooledFileInfo {
              */
             this["printerDevType"] = "";
         }
+        if (!("deviceType" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["deviceType"] = "";
+        }
         if (!("createdBy" in $$source)) {
             /**
              * @member
@@ -1284,6 +1306,13 @@ export class SpooledFileMoveRequest {
              */
             this["jobNumber"] = "";
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["deviceType"] = undefined;
+        }
         if (!("toLibrary" in $$source)) {
             /**
              * @member
@@ -1368,6 +1397,14 @@ export class SpooledFileRequest {
              */
             this["allOutqs"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * 0 = unlimited
+             * @member
+             * @type {number | undefined}
+             */
+            this["maxRows"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -1402,6 +1439,20 @@ export class SpooledFileResult {
              * @type {SpooledFileInfo[]}
              */
             this["files"] = [];
+        }
+        if (!("truncated" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["truncated"] = false;
+        }
+        if (!("cancelled" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["cancelled"] = false;
         }
         if (!("openMs" in $$source)) {
             /**
