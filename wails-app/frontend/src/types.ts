@@ -179,6 +179,7 @@ export interface ConnectionProfile {
     preloadSpool?: boolean; // undefined = on
     saveScript?: boolean; // undefined = on ("Save SQL/CL script between sessions")
     script?: string; // SQL/CL text saved with the profile
+    sessionScript?: string;
     passwordB64?: string;
     lastUsedAt?: number;
     pinnedAt?: number;
@@ -192,6 +193,7 @@ export interface AppSettings {
     autoOpenDownloads?: boolean; // legacy; superseded by spoolDblClickAction
     spoolDblClickAction?: "" | "view" | "dlPdf" | "dlText" | "print"; // "" = view
     defaultNaming?: "" | "sql" | "system"; // "" = sql
+    excelColumnHeading?: "" | "fieldName" | "columnHeading";
     excelDateFormat?: "" | "locale" | "iso" | "us" | "eu";
     excelTimeFormat?: "" | "locale" | "24h" | "12h";
     excelTimestampFormat?: "" | "locale" | "iso" | "us" | "eu" | "ibmi" | "ibmiDot";
@@ -223,6 +225,7 @@ export interface AppBinding {
     SaveSpooledFile(filename: string, base64Data: string): Promise<string>;
     SaveFileAs(filename: string, base64Data: string, filterLabel: string, filterPattern: string): Promise<string>;
     SaveXLSXAs(filename: string, columns: ColumnInfo[], rows: unknown[][]): Promise<string>;
+    SaveConnectionSessionScript(host: string, user: string, script: string): Promise<void>;
     OpenFileAs(filterLabel: string, filterPattern: string): Promise<string>;
     PrintSpooledFile(filename: string, base64Data: string): Promise<string>;
     OpenSpooledFile(path: string): Promise<void>;
@@ -248,6 +251,7 @@ export interface AppBinding {
     ListWorkspaces(): Promise<unknown[]>;
     GetConnectionIdentity(connectionId: string): Promise<{ host: string; user: string }>;
     UpdateEditorText(connectionId: string, text: string): Promise<void>;
+    SetInitialEditorText(connectionId: string, text: string): Promise<void>;
     UpdateMessagesHTML(connectionId: string, html: string): Promise<void>;
     UpdateStatusText(connectionId: string, text: string): Promise<void>;
     UpdatePinnedResults(connectionId: string, pinned: PinnedResult[]): Promise<void>;

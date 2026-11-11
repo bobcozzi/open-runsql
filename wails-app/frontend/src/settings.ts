@@ -51,7 +51,7 @@ export function createSwitch(initial = false, ariaLabel = ""): SwitchControl {
     return sw;
 }
 
-export type SettingType = "text" | "number" | "folder" | "choice" | "toggle" | "group";
+export type SettingType = "text" | "number" | "folder" | "choice" | "color" | "toggle" | "group";
 
 export interface SettingDef {
     /** Stable key; also the l10n suffix (settings.<key>.label / .desc). */
@@ -178,19 +178,57 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
                 label.htmlFor = `setting-${control.key}`;
                 label.textContent = t(`settings.${control.key}.label`, control.key);
 
-                const select = document.createElement("select");
-                select.id = label.htmlFor;
-                select.className = "settings-input";
-                for (const [value, text] of control.options ?? []) {
-                    const option = document.createElement("option");
-                    option.value = value;
-                    option.textContent = text;
-                    select.appendChild(option);
+                if (control.type === "toggle") {
+                    const sw = createSwitch(current(control) === "on", label.textContent);
+                    sw.id = label.htmlFor;
+                    sw.addEventListener("change", () => {
+                        void (async () => {
+                            const value = sw.checked ? "on" : "off";
+                            try {
+                                const next = updatedSettings(control, value);
+                                if (control.persist) await control.persist(value);
+                                else await opts.save(next);
+                                settings = next;
+                                opts.onSaved?.();
+                                opts.onChanged?.(control.key, value);
+                            } catch (err) {
+                                sw.checked = !sw.checked;
+                                opts.onError?.(String((err as Error)?.message ?? err));
+                            }
+                        })();
+                    });
+                    controlRow.append(label, sw);
+                    group.appendChild(controlRow);
+                    continue;
                 }
-                select.value = current(control);
-                select.addEventListener("change", () => {
+
+                const field = control.type === "color" || control.type === "number" ? document.createElement("input") : document.createElement("select");
+                field.id = label.htmlFor;
+                field.className = "settings-input";
+                if (field instanceof HTMLInputElement) {
+                    field.type = control.type;
+                    if (control.type === "number") {
+                        if (control.min !== undefined) field.min = String(control.min);
+                        if (control.max !== undefined) field.max = String(control.max);
+                    }
+                } else {
+                    for (const [value, text] of control.options ?? []) {
+                        const option = document.createElement("option");
+                        option.value = value;
+                        option.textContent = text;
+                        field.appendChild(option);
+                    }
+                }
+                field.value = current(control);
+                field.addEventListener("change", () => {
                     void (async () => {
-                        const value = select.value;
+                        let value = field.value;
+                        if (control.type === "number") {
+                            const number = Number(value);
+                            if (!value || !Number.isFinite(number)) { field.value = current(control); return; }
+                            value = String(Math.min(control.max ?? number, Math.max(control.min ?? number, number)));
+                            field.value = value;
+                        }
                         if (value === current(control)) return;
                         const next = updatedSettings(control, value);
                         try {
@@ -201,11 +239,11 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
                             opts.onChanged?.(control.key, value);
                         } catch (err) {
                             opts.onError?.(String((err as Error)?.message ?? err));
-                            select.value = current(control);
+                            field.value = current(control);
                         }
                     })();
                 });
-                controlRow.append(label, select);
+                controlRow.append(label, field);
                 group.appendChild(controlRow);
             }
             editor.appendChild(group);

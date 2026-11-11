@@ -112,6 +112,16 @@
                     </svg>
                 </button>
                 <button id="btn-history" class="btn" type="button" title="Statement history (F6)">History</button>
+                <button id="btn-reload-script" class="btn icon-btn" type="button" disabled title="Reload initial SQL script"
+                    aria-label="Reload initial SQL script">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M20 11a8 8 0 0 0-14-5L4 8" />
+                        <path d="M4 4v4h4" />
+                        <path d="M4 13a8 8 0 0 0 14 5l2-2" />
+                        <path d="M16 16h4v4" />
+                    </svg>
+                </button>
                 <button id="btn-script-open" class="btn icon-btn" type="button"
                     title="Open a .sql script into the editor (Ctrl/Cmd+O)">
                     <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
@@ -131,12 +141,9 @@
                 </button>
             </span>
             <span id="run-status" class="run-status" hidden></span>
-            <span class="hint" id="input-hint">SQL &mdash; or prefix with <code>CL:</code> for IBM i commands (e.g.
-                <code>CL: ADDLIBLE LIB(SQLTOOLS)</code>)</span>
+            <span class="toolbar-status" id="toolbar-status" role="status" aria-live="polite" aria-atomic="true"></span>
         </div>
-        <textarea id="sql-input" class="sql-input" spellcheck="false" autocomplete="off" autocorrect="off"
-            autocapitalize="off"
-            placeholder="SELECT * FROM QSYS2.SYSTEM_STATUS_INFO&#10;CL: DSPLIBL OUTPUT(*PRINT)"></textarea>
+        <div id="sql-input" class="sql-editor"></div>
     </section>
 
     <div id="splitter" class="splitter" role="separator" aria-orientation="horizontal" title="Drag to resize"></div>
@@ -155,11 +162,11 @@
             <span id="save-results-wrap" class="save-results" hidden>
                 <button id="btn-save-results" class="btn" type="button">Save as...</button>
                 <select id="sel-save-format" title="Format">
-                    <option value="csv" selected>CSV</option>
+                    <option value="xlsx" selected>XLSX</option>
+                    <option value="csv">CSV</option>
                     <option value="tsv">TAB</option>
                     <option value="json">JSON</option>
                     <option value="md">Markdown</option>
-                    <option value="xlsx">XLSX</option>
                 </select>
                 <input id="in-save-delim" class="save-delim" type="text" value=","
                     title="Delimiter; applies to CSV. Escapes: \t tab, \n newline, \r return, \s space" hidden />

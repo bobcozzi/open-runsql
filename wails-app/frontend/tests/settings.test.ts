@@ -21,11 +21,18 @@ const DEFS: SettingDef[] = [
 ];
 
 const EXCEL_FORMAT_DEFS: SettingDef[] = [{
-    key: "excelDateTimeFormats",
+    key: "excelExportOptions",
     type: "group",
     get: () => "",
     withValue: (s) => s,
     controls: [
+        {
+            key: "excelColumnHeading", type: "choice",
+            options: [["fieldName", "Field Name"], ["columnHeading", "Column Heading"]],
+            get: (s) => s.excelColumnHeading || "columnHeading",
+            withValue: (s, v) => ({ ...s, excelColumnHeading: v as AppSettings["excelColumnHeading"] }),
+            persist: vi.fn(() => Promise.resolve()),
+        },
         {
             key: "excelDateFormat", type: "choice",
             options: [["locale", "Locale"], ["iso", "ISO"], ["us", "U.S."], ["eu", "Day-first"]],
@@ -62,6 +69,44 @@ function mkPane(over: Partial<Parameters<typeof createSettingsPane>[0]> = {}) {
 }
 
 describe("settings pane", () => {
+    it("persists a grouped SQL highlighting switch", async () => {
+        const persist = vi.fn(async () => {});
+        const onChanged = vi.fn();
+        const pane = createSettingsPane({ load: async () => ({}), save: async () => {}, onChanged }, [{
+            key: "editorOptions", type: "group", controls: [{
+                key: "editorSqlHighlighting", type: "toggle", get: () => "on", persist,
+            }],
+        }]);
+        document.body.appendChild(pane.root);
+        await vi.waitFor(() => expect(pane.root.querySelector('[role="switch"]')).toBeTruthy());
+        const toggle = pane.root.querySelector<HTMLElement>('[role="switch"]')!;
+        expect(toggle.getAttribute("aria-checked")).toBe("true");
+        toggle.click();
+        await vi.waitFor(() => expect(persist).toHaveBeenCalledWith("off"));
+        expect(onChanged).toHaveBeenCalledWith("editorSqlHighlighting", "off");
+        pane.root.remove();
+    });
+    it("renders and persists color swatches in a settings group", async () => {
+        const persist = vi.fn(async () => {});
+        const pane = createSettingsPane({ load: async () => ({}), save: async () => {} }, [{
+            key: "editorOptions", type: "group", controls: [{
+                key: "editorStopColor", type: "color", get: () => "#c62828", persist,
+            }, { key: "editorFontSize", type: "number", min: 9, max: 24, get: () => "13", persist }],
+        }]);
+        document.body.appendChild(pane.root);
+        await vi.waitFor(() => expect(pane.root.querySelector<HTMLInputElement>('input[type="color"]')).toBeTruthy());
+        const swatch = pane.root.querySelector<HTMLInputElement>('input[type="color"]')!;
+        expect(swatch.value).toBe("#c62828");
+        swatch.value = "#123456";
+        swatch.dispatchEvent(new Event("change", { bubbles: true }));
+        await vi.waitFor(() => expect(persist).toHaveBeenCalledWith("#123456"));
+        const fontSize = pane.root.querySelector<HTMLInputElement>('input[type="number"]')!;
+        expect(fontSize.value).toBe("13");
+        fontSize.value = "30";
+        fontSize.dispatchEvent(new Event("change", { bubbles: true }));
+        await vi.waitFor(() => expect(persist).toHaveBeenCalledWith("24"));
+        pane.root.remove();
+    });
     it("lists one key per definition and selects the first by default", async () => {
         const { pane } = mkPane();
         await vi.waitFor(() => {
@@ -95,15 +140,26 @@ describe("settings pane", () => {
 
         await vi.waitFor(() => {
             expect(pane.root.querySelectorAll(".settings-key").length).toBe(1);
-            expect(pane.root.querySelectorAll(".settings-group-row").length).toBe(3);
+            expect(pane.root.querySelectorAll(".settings-group-row").length).toBe(4);
         });
-        expect(pane.root.querySelectorAll<HTMLSelectElement>(".settings-group-row select").length).toBe(3);
+        expect(pane.root.querySelector(".settings-key")?.textContent).toBe("Excel Export Options");
+        expect([...pane.root.querySelectorAll(".settings-group-row label")].map((label) => label.textContent)).toEqual([
+            "Column headings", "Date format", "Time format", "Timestamp format",
+        ]);
+        expect(pane.root.querySelectorAll<HTMLSelectElement>(".settings-group-row select").length).toBe(4);
+        const headingSelect = pane.root.querySelector<HTMLSelectElement>("#setting-excelColumnHeading")!;
+        expect(headingSelect.value).toBe("columnHeading");
+        headingSelect.value = "fieldName";
+        headingSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        await vi.waitFor(() => {
+            expect(EXCEL_FORMAT_DEFS[0].controls?.[0].persist).toHaveBeenCalledWith("fieldName");
+        });
         const dateSelect = pane.root.querySelector<HTMLSelectElement>("#setting-excelDateFormat")!;
         expect(dateSelect.value).toBe("locale");
         dateSelect.value = "us";
         dateSelect.dispatchEvent(new Event("change", { bubbles: true }));
         await vi.waitFor(() => {
-            expect(EXCEL_FORMAT_DEFS[0].controls?.[0].persist).toHaveBeenCalledWith("us");
+            expect(EXCEL_FORMAT_DEFS[0].controls?.[1].persist).toHaveBeenCalledWith("us");
         });
         pane.root.remove();
     });

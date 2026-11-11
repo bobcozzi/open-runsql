@@ -32,11 +32,11 @@ export function unescapeDelimiter(raw: string): string {
 }
 
 export const SAVE_FORMATS: { id: SaveFormat; label: string; ext: string }[] = [
+    { id: "xlsx", label: "XLSX", ext: "xlsx" },
     { id: "csv", label: "CSV (comma-separated)", ext: "csv" },
     { id: "tsv", label: "TSV (tab-separated)", ext: "tsv" },
     { id: "json", label: "JSON", ext: "json" },
     { id: "md", label: "Markdown table", ext: "md" },
-    { id: "xlsx", label: "XLSX", ext: "xlsx" },
 ];
 
 const SAVE_FORMAT_STORAGE_KEY = "ibmi-runsql-save-format";
@@ -79,7 +79,7 @@ function heading(c: ResultColumn): string {
 }
 
 export function formatResultData(cols: ResultColumn[], rows: unknown[][], format: TextSaveFormat, delimOverride?: string): string {
-    const heads = cols.map(heading);
+    const heads = cols.map((column) => format === "csv" ? (column.name.trim() || heading(column)) : heading(column));
     if (format === "json") {
         const out = rows.map((r) => {
             const obj: Record<string, unknown> = {};

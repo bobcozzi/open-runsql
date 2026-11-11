@@ -19,17 +19,18 @@ type PinnedResult struct {
 // window (main or torn-off) renders from the same source of truth. The
 // frontend mirrors this via the "workspace:changed" event.
 type WorkspaceState struct {
-	ConnectionID   string         `json:"connectionId"`
-	Label          string         `json:"label"`
-	EditorText     string         `json:"editorText"`
-	Columns        []ColumnInfo   `json:"columns"`
-	Rows           [][]any        `json:"rows"`
-	CursorID       string         `json:"cursorId,omitempty"`
-	More           bool           `json:"more"`
-	StatusText     string         `json:"statusText"`
-	MessagesHTML   string         `json:"messagesHtml"`
-	ShowingResults bool           `json:"showingResults"`
-	PinnedResults  []PinnedResult `json:"pinnedResults,omitempty"`
+	ConnectionID      string         `json:"connectionId"`
+	Label             string         `json:"label"`
+	EditorText        string         `json:"editorText"`
+	InitialEditorText string         `json:"initialEditorText"`
+	Columns           []ColumnInfo   `json:"columns"`
+	Rows              [][]any        `json:"rows"`
+	CursorID          string         `json:"cursorId,omitempty"`
+	More              bool           `json:"more"`
+	StatusText        string         `json:"statusText"`
+	MessagesHTML      string         `json:"messagesHtml"`
+	ShowingResults    bool           `json:"showingResults"`
+	PinnedResults     []PinnedResult `json:"pinnedResults,omitempty"`
 }
 
 // WorkspaceStore holds workspace state per connection and emits change events.

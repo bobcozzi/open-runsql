@@ -669,37 +669,62 @@ body.resizing-v {
     flex: none;
 }
 
-.hint {
+.toolbar-status {
     color: var(--fg-dim);
     font-size: 12px;
     margin-left: 8px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.hint code {
-    background: var(--bg-input);
-    padding: 1px 5px;
-    border-radius: 3px;
-}
-
-.sql-input {
-    width: 100%;
+.sql-editor {
+    position: relative;
     flex: 1 1 auto;
-    /* +2 lines over the old 40px floor (~3 -> 5 visible lines). */
     min-height: 112px;
-    resize: none;
-    /* splitter owns resizing now; manual corner-drag fought it */
+    min-width: 0;
     background: var(--bg-input);
+    border-radius: 4px;
+}
+
+.sql-editor .cm-editor {
+    height: 100%;
     border: 1px solid var(--border);
     border-radius: 4px;
     color: var(--fg);
     font-family: "SF Mono", Menlo, Consolas, monospace;
-    font-size: 13px;
-    padding: 8px;
+    font-size: var(--editor-font-size, 13px);
 }
 
-.sql-input:focus {
-    outline: 1px solid var(--accent);
-}
+.sql-editor .cm-scroller { overflow: auto; font-family: inherit; }
+.sql-editor .cm-content { padding: 8px 0; caret-color: var(--fg); }
+.sql-editor .cm-line { padding: 0 8px; }
+.sql-editor .cm-placeholder { color: var(--fg-dim); }
+.sql-editor .cm-focused { outline: 1px solid var(--accent); }
+.cm-editor .editor-running-statement { background-color: rgba(68, 139, 218, 0.26); border-radius: 2px; }
+[data-theme="dark"] .cm-editor .editor-running-statement { background-color: rgba(101, 165, 235, 0.32); }
+.cm-editor .sql-token-keyword { color: #174eae; }
+.cm-editor .sql-token-string { color: #a23838; }
+.cm-editor .sql-token-literal { color: #8b3db0; }
+.cm-editor .sql-token-type { color: #006a72; }
+.cm-editor .sql-token-operator { color: #6b4c00; }
+[data-theme="dark"] .cm-editor .sql-token-keyword { color: #8ab4f8; }
+[data-theme="dark"] .cm-editor .sql-token-string { color: #f2a4a4; }
+[data-theme="dark"] .cm-editor .sql-token-literal { color: #d3a7f5; }
+[data-theme="dark"] .cm-editor .sql-token-type { color: #70d2d3; }
+[data-theme="dark"] .cm-editor .sql-token-operator { color: #e4c374; }
+.cm-editor .editor-highlight-stop { color: var(--editor-stop-color, #c62828); }
+.cm-editor .editor-highlight-comment { color: var(--editor-comment-color, #18783a); }
+.cm-editor .editor-highlight-cl-command, .cm-editor .editor-highlight-cl-command span { color: var(--editor-cl-command-color, #075428); }
+.cm-editor .editor-highlight-cl-keyword, .cm-editor .editor-highlight-cl-keyword span { color: var(--editor-cl-keyword-color, #1753ad); }
+.cm-editor .editor-highlight-cl-value, .cm-editor .editor-highlight-cl-value span { color: var(--editor-cl-value-color, #198047); }
+[data-theme="dark"] .cm-editor .editor-highlight-stop { color: var(--editor-stop-color, #ff7777); }
+[data-theme="dark"] .cm-editor .editor-highlight-comment { color: var(--editor-comment-color, #76d18c); }
+[data-theme="dark"] .cm-editor .editor-highlight-cl-command, [data-theme="dark"] .cm-editor .editor-highlight-cl-command span { color: var(--editor-cl-command-color, #59ae71); }
+[data-theme="dark"] .cm-editor .editor-highlight-cl-keyword, [data-theme="dark"] .cm-editor .editor-highlight-cl-keyword span { color: var(--editor-cl-keyword-color, #8ab4f8); }
+[data-theme="dark"] .cm-editor .editor-highlight-cl-value, [data-theme="dark"] .cm-editor .editor-highlight-cl-value span { color: var(--editor-cl-value-color, #a5e3b2); }
+
 
 .message-list {
     list-style: none;
@@ -1776,6 +1801,13 @@ tr:nth-child(even) td {
     justify-self: start;
     width: auto;
     min-width: 0;
+}
+
+.settings-group-row input[type="color"] {
+    width: 40px;
+    height: 28px;
+    padding: 2px;
+    cursor: pointer;
 }
 
 .settings-input {

@@ -258,13 +258,12 @@ type ConnectionProfile struct {
 	BidiStringType string `json:"bidiStringType,omitempty"`
 	SavePassword   bool   `json:"savePassword,omitempty"`
 	// PreloadSpool: fetch the spooled-file list at connect (default on).
-	PreloadSpool *bool `json:"preloadSpool,omitempty"`
-	// Script: SQL/CL text saved with the profile; restored into the editor on
-	// connect when set. SaveScript gates the auto-save (default on).
-	Script      string `json:"script,omitempty"`
-	SaveScript  *bool  `json:"saveScript,omitempty"`
-	PasswordB64 string `json:"passwordB64,omitempty"`
-	LastUsedAt  int64  `json:"lastUsedAt"`
+	PreloadSpool  *bool  `json:"preloadSpool,omitempty"`
+	Script        string `json:"script,omitempty"`
+	SaveScript    *bool  `json:"saveScript,omitempty"`
+	SessionScript string `json:"sessionScript,omitempty"`
+	PasswordB64   string `json:"passwordB64,omitempty"`
+	LastUsedAt    int64  `json:"lastUsedAt"`
 	// PinnedAt is set by "Move to top": the stable list position override.
 	PinnedAt int64 `json:"pinnedAt,omitempty"`
 	// SortOrder is the user's explicit list position (lower = earlier). Set by
@@ -283,9 +282,10 @@ const profileOrderThreshold = 5
 type App struct {
 	app *application.App
 
-	mu     sync.Mutex
-	client *bridge.Client
-	jar    string
+	mu        sync.Mutex
+	client    *bridge.Client
+	jar       string
+	profileMu sync.Mutex
 
 	connections map[string]*connState
 	workspace   *WorkspaceStore
@@ -381,9 +381,10 @@ type AppSettings struct {
 	SpoolDownloadDir     string `json:"spoolDownloadDir,omitempty"`
 	ScriptsDir           string `json:"scriptsDir,omitempty"`
 	FetchSize            int    `json:"fetchSize,omitempty"`
-	AutoOpenDownloads    *bool  `json:"autoOpenDownloads,omitempty"`    // legacy; superseded by SpoolDblClickAction
-	SpoolDblClickAction  string `json:"spoolDblClickAction,omitempty"`  // view | dlPdf | dlText | print ("" = view)
-	DefaultNaming        string `json:"defaultNaming,omitempty"`        // sql | system ("" = sql)
+	AutoOpenDownloads    *bool  `json:"autoOpenDownloads,omitempty"`   // legacy; superseded by SpoolDblClickAction
+	SpoolDblClickAction  string `json:"spoolDblClickAction,omitempty"` // view | dlPdf | dlText | print ("" = view)
+	DefaultNaming        string `json:"defaultNaming,omitempty"`       // sql | system ("" = sql)
+	ExcelColumnHeading   string `json:"excelColumnHeading,omitempty"`
 	ExcelDateFormat      string `json:"excelDateFormat,omitempty"`      // locale | iso | us | eu ("" = locale)
 	ExcelTimeFormat      string `json:"excelTimeFormat,omitempty"`      // locale | 24h | 12h ("" = locale)
 	ExcelTimestampFormat string `json:"excelTimestampFormat,omitempty"` // locale | iso | us | eu ("" = locale)
@@ -448,6 +449,13 @@ func (a *App) SetAppSetting(key, value string) error {
 			}
 		}
 		s.SpoolDownloadDir = d
+	case "excelColumnHeading":
+		switch strings.TrimSpace(value) {
+		case "", "fieldName", "columnHeading":
+			s.ExcelColumnHeading = strings.TrimSpace(value)
+		default:
+			return fmt.Errorf("invalid Excel column heading: %s", value)
+		}
 	case "excelDateFormat":
 		switch strings.TrimSpace(value) {
 		case "", "locale", "iso", "us", "eu", "mdy", "mdyy", "dmy", "dmyy", "ymd", "yymd":
@@ -673,6 +681,8 @@ func sortProfiles(profiles []ConnectionProfile) {
 // not named keep their relative order after the named ones. Clears PinnedAt
 // (explicit order replaces pinning).
 func (a *App) ReorderConnectionProfiles(names []string) error {
+	a.profileMu.Lock()
+	defer a.profileMu.Unlock()
 	profiles, err := loadProfiles()
 	if err != nil {
 		return err
@@ -708,6 +718,8 @@ func saveProfiles(profiles []ConnectionProfile) error {
 // base64 passwords are migrated into the OS credential vault on first read
 // and scrubbed from the file when migration succeeds.
 func (a *App) ListConnectionProfiles() ([]ConnectionProfile, error) {
+	a.profileMu.Lock()
+	defer a.profileMu.Unlock()
 	profiles, err := loadProfiles()
 	if err != nil {
 		return nil, err
@@ -727,6 +739,8 @@ func (a *App) ListConnectionProfiles() ([]ConnectionProfile, error) {
 // GetProfilePassword returns the stored password for a profile (OS vault
 // first, legacy base64 second). Used by the Quick Connect form to prefill.
 func (a *App) GetProfilePassword(name string) (string, error) {
+	a.profileMu.Lock()
+	defer a.profileMu.Unlock()
 	profiles, err := loadProfiles()
 	if err != nil {
 		return "", err
@@ -755,6 +769,9 @@ func (a *App) GetProfilePassword(name string) (string, error) {
 func mergeProfile(profiles []ConnectionProfile, p ConnectionProfile) ([]ConnectionProfile, bool) {
 	for i, existing := range profiles {
 		if strings.EqualFold(existing.Host, p.Host) && strings.EqualFold(existing.User, p.User) {
+			p.Script = existing.Script
+			p.SaveScript = existing.SaveScript
+			p.SessionScript = existing.SessionScript
 			// Password carries over whenever the incoming profile doesn't
 			// explicitly clear it (SavePassword=false means "don't store").
 			if p.PasswordB64 == "" && p.SavePassword {
@@ -775,6 +792,8 @@ func mergeProfile(profiles []ConnectionProfile, p ConnectionProfile) ([]Connecti
 // SaveConnectionProfile upserts a profile keyed by host+user, refreshing
 // LastUsedAt; list ordering is decided by sortProfiles at read time.
 func (a *App) SaveConnectionProfile(p ConnectionProfile) error {
+	a.profileMu.Lock()
+	defer a.profileMu.Unlock()
 	p.Host = strings.TrimSpace(p.Host)
 	if p.Host == "" {
 		return errors.New("host is required")
@@ -807,6 +826,8 @@ func (a *App) SaveConnectionProfile(p ConnectionProfile) error {
 
 // DeleteConnectionProfile removes a profile by name.
 func (a *App) DeleteConnectionProfile(name string) error {
+	a.profileMu.Lock()
+	defer a.profileMu.Unlock()
 	profiles, err := loadProfiles()
 	if err != nil {
 		return err
@@ -826,6 +847,8 @@ func (a *App) DeleteConnectionProfile(name string) error {
 // (rename-safe, unlike the host+user-keyed SaveConnectionProfile). Created-
 // order fields (LastUsedAt/PinnedAt) and a stored password are preserved.
 func (a *App) UpdateConnectionProfile(origName string, p ConnectionProfile) error {
+	a.profileMu.Lock()
+	defer a.profileMu.Unlock()
 	p.Host = strings.TrimSpace(p.Host)
 	if p.Host == "" {
 		return errors.New("host is required")
@@ -843,6 +866,7 @@ func (a *App) UpdateConnectionProfile(origName string, p ConnectionProfile) erro
 	}
 	for i, existing := range profiles {
 		if strings.EqualFold(existing.Name, origName) || strings.EqualFold(existing.Host, origName) {
+			p.SessionScript = existing.SessionScript
 			p.LastUsedAt = existing.LastUsedAt
 			p.PinnedAt = existing.PinnedAt
 			p.SortOrder = existing.SortOrder
@@ -883,8 +907,30 @@ func (a *App) UpdateConnectionProfile(origName string, p ConnectionProfile) erro
 	return saveProfiles(profiles)
 }
 
+func (a *App) SaveConnectionSessionScript(host, user, script string) error {
+	a.profileMu.Lock()
+	defer a.profileMu.Unlock()
+	profiles, err := loadProfiles()
+	if err != nil {
+		return err
+	}
+	for index := range profiles {
+		profile := &profiles[index]
+		if strings.EqualFold(profile.Host, host) && strings.EqualFold(profile.User, user) {
+			if profile.SaveScript != nil && !*profile.SaveScript {
+				return nil
+			}
+			profile.SessionScript = script
+			return saveProfiles(profiles)
+		}
+	}
+	return errors.New("connection profile not found")
+}
+
 // MoveConnectionProfileToTop pins a profile at the top of the dropdown.
 func (a *App) MoveConnectionProfileToTop(name string) error {
+	a.profileMu.Lock()
+	defer a.profileMu.Unlock()
 	profiles, err := loadProfiles()
 	if err != nil {
 		return err
@@ -1120,6 +1166,13 @@ func (a *App) ListWorkspaces() []WorkspaceState {
 // UpdateEditorText records the editor text for a connection (called on input).
 func (a *App) UpdateEditorText(connectionID, text string) {
 	a.workspace.Update(connectionID, func(w *WorkspaceState) {
+		w.EditorText = text
+	})
+}
+
+func (a *App) SetInitialEditorText(connectionID, text string) {
+	a.workspace.Update(connectionID, func(w *WorkspaceState) {
+		w.InitialEditorText = text
 		w.EditorText = text
 	})
 }

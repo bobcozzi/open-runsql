@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/xml"
+	"fmt"
 	"io"
 	"math"
 	"strconv"
@@ -18,6 +19,66 @@ var testXLSXSettings = AppSettings{
 	ExcelDateFormat:      "iso",
 	ExcelTimeFormat:      "24h",
 	ExcelTimestampFormat: "iso",
+}
+
+func TestExcelColumnHeadingSetting(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv("HOME", configDir)
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	t.Setenv("AppData", configDir)
+	app := &App{}
+	for _, value := range []string{"fieldName", "columnHeading", ""} {
+		if err := app.SetAppSetting("excelColumnHeading", value); err != nil {
+			t.Fatalf("save %q: %v", value, err)
+		}
+		if got := loadAppSettings().ExcelColumnHeading; got != value {
+			t.Errorf("saved heading setting = %q; want %q", got, value)
+		}
+	}
+	if err := app.SetAppSetting("excelColumnHeading", "invalid"); err == nil {
+		t.Fatal("invalid heading setting was accepted")
+	}
+}
+
+func TestBuildXLSXColumnHeadings(t *testing.T) {
+	columns := []ColumnInfo{
+		{Name: "CUSTNO", Label: "Customer   Number"},
+		{Name: "NO_LABEL", Label: "   "},
+		{Label: "Label Only"},
+	}
+	for _, choice := range []string{"", "columnHeading", "fieldName"} {
+		for _, rowCount := range []int{0, xlsxStreamAtRows} {
+			t.Run(fmt.Sprintf("%s/rows-%d", choice, rowCount), func(t *testing.T) {
+				rows := make([][]any, rowCount)
+				for index := range rows {
+					rows[index] = []any{nil, nil, nil}
+				}
+				data, err := buildXLSXWithSettings(columns, rows, AppSettings{ExcelColumnHeading: choice})
+				if err != nil {
+					t.Fatal(err)
+				}
+				workbook, err := excelize.OpenReader(bytes.NewReader(data))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer workbook.Close()
+				first := "Customer Number"
+				if choice == "fieldName" {
+					first = "CUSTNO"
+				}
+				for cell, want := range map[string]string{"A1": first, "B1": "NO_LABEL", "C1": "Label Only"} {
+					got, err := workbook.GetCellValue("SQL Results", cell)
+					if err != nil || got != want {
+						t.Errorf("%s = %q, err=%v; want %q", cell, got, err, want)
+					}
+				}
+				width, err := workbook.GetColWidth("SQL Results", "A")
+				if err != nil || width < float64(len(first)+2) {
+					t.Errorf("column A width = %v, err=%v; want room for %q", width, err, first)
+				}
+			})
+		}
+	}
 }
 
 func TestBuildXLSXPreservesTypesAndMetadata(t *testing.T) {

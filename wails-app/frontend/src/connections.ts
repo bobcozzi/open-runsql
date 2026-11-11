@@ -29,6 +29,7 @@ export interface ConnectionsPaneOptions {
 export interface ConnectionsPaneHandle {
     root: HTMLElement;
     reload(): Promise<void>;
+    commit(): Promise<boolean>;
 }
 
 export function createConnectionsPane(opts: ConnectionsPaneOptions): ConnectionsPaneHandle {
@@ -97,7 +98,7 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
     const inTls = createSwitch(false, t("conn.tls", "Secure (TLS)"));
     const inSavePw = createSwitch(false, t("conn.savePassword", "Save password"));
     const inPreload = createSwitch(true, t("conn.preloadSpool", "Preload spooled files at connect"));
-    const inSaveScript = createSwitch(true, t("conn.saveScript", "Save SQL/CL script between sessions"));
+    const inSaveScript = createSwitch(true, t("conn.saveScript", "Auto Save/Restore SQL Script between connections"));
     const inScript = document.createElement("textarea");
     inScript.className = "settings-input conn-script";
     inScript.spellcheck = false;
@@ -161,8 +162,12 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
     switchRow("conn.tls", "Secure (TLS)", inTls, t("conn.tls", "Secure (TLS)"), "");
     switchRow("conn.savePassword", "Save password", inSavePw, t("conn.savePwOn", "On — stored in the OS credential vault"), t("conn.savePwOff", "Off — not stored"));
     switchRow("conn.preloadSpool", "Preload spooled files at connect", inPreload, "", "");
-    switchRow("conn.saveScript", "Save SQL/CL script between sessions", inSaveScript, "", "");
-    row("conn.script", "SQL/CL script", inScript);
+    switchRow("conn.saveScript", "Auto Save/Restore SQL Script between connections", inSaveScript, "", "");
+    row("conn.script", "Startup SQL Script (does not auto-run)", inScript);
+    const scriptNote = document.createElement("div");
+    scriptNote.className = "settings-desc";
+    scriptNote.textContent = t("conn.scriptNote", "Ignored when Auto Save/Restore SQL Script is on.");
+    form.appendChild(scriptNote);
 
     const note = document.createElement("div");
     note.className = "settings-desc";
@@ -420,8 +425,11 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
     });
 
     btnConnectTab.addEventListener("click", () => {
-        const src = profiles.find((p) => p.name === origName);
-        if (src && opts.onConnect) opts.onConnect(src);
+        void (async () => {
+            if (!dirtyMarker.hidden && !await save()) return;
+            const src = profiles.find((p) => p.name === origName);
+            if (src && opts.onConnect) opts.onConnect(src);
+        })();
     });
 
     btnNew.addEventListener("click", () => {
@@ -453,5 +461,5 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
     fill(null);
     void reload();
 
-    return { root, reload: () => reload(origName) };
+    return { root, reload: () => reload(origName), commit: () => dirtyMarker.hidden ? Promise.resolve(true) : save() };
 }

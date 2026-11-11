@@ -31,16 +31,18 @@ Type SQL statements or CL commands, one or many; a statement ends at `;`.
 - **Run All** — every statement in order. **Run From** — cursor statement through the last. **Cancel** stops a running statement.
 - **CL commands**: prefix with `CL:` — e.g. `CL: WRKSYSSTS OUTPUT(*PRINT)`. When the command name can't collide with SQL you can omit the prefix, but `CL:` is recommended.
 - **CL prompting**: caret on a CL command + **F4** (or **Prompt**) opens a form-driven prompter with validation, dependencies, and special values. SQL prompting is planned for a future release.
+- **Editor Options** in Settings controls editor font size and the colors for STOP statements and comments.
 
 ## History & scripts
 
 - **F8/F9** (or ↑/↓ on the first/last editor line) recall previous statements; **F6** or **History** opens the searchable, timestamped per-connection log (Enter inserts at the cursor, × deletes).
-- Your script text is saved per connection automatically and restored at connect when **Save SQL/CL script between sessions** is on in the Connections tab. **File...** saves/opens a `.sql` file via the system dialog.
+- In Connections, **Auto Save/Restore SQL Script between connections** saves editor text separately for each connection and restores it on connect. When off, the user-defined **Startup SQL Script** initializes the editor instead. Neither is run automatically. Existing profile scripts remain in the startup field; automatic session text starts separately. **File...** saves/opens a `.sql` file via the system dialog.
+- **Reload initial SQL script** restores the editor to the text loaded at the start of the current connection after confirmation, even if later edits were automatically saved.
 
 ## Results
 
 - Click column headers to sort; NULLs sort last. **Load more / Load all** page large result sets.
-- **Save as...** exports the grid as CSV, TSV, JSON, or Markdown (system Save dialog); **Open Folder** reveals the download folder.
+- **Save as...** exports the grid as CSV, TSV, JSON, Markdown, or XLSX (system Save dialog); **Open Folder** reveals the download folder. CSV uses field names; Settings > Excel Export Options selects field names or result column headings for XLSX and configures date/time display formats.
 
 ## Spooled Files
 

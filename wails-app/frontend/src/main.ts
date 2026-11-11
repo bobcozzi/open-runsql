@@ -29,6 +29,10 @@ import { createSettingsPane, createSwitch, type SettingDef } from "./settings";
 import { createConnectionsPane } from "./connections";
 import { renderScsBytes, formatOsVersion } from "./scsRender";
 import { formatResultData, loadPreferredSaveFormat, persistPreferredSaveFormat, unescapeDelimiter, type SaveFormat } from "./resultExport";
+import { confirmReloadInitialScript, reloadInitialScript, scriptForConnection } from "./sessionScript";
+import { createToolbarStatus } from "./toolbarStatus";
+import { applyClColorSetting, clColorSettings, restoreClColors } from "./clColors";
+import { SqlEditor } from "./sqlEditor";
 import { showHistoryPicker } from "./stmtHistory";
 import type { SpooledFileInfo } from "./types";
 import { t } from "./l10n";
@@ -51,7 +55,7 @@ const els = {
     btnRunFrom: el<HTMLButtonElement>("btn-run-from"),
     btnCancel: el<HTMLButtonElement>("btn-cancel"),
     btnPrompt: el<HTMLButtonElement>("btn-prompt"),
-    sqlInput: el<HTMLTextAreaElement>("sql-input"),
+    sqlInput: new SqlEditor(el<HTMLElement>("sql-input"), localStorage.getItem("ibmi-runsql-sql-highlighting") !== "off"),
     workArea: el<HTMLElement>("work-area"),
     workTabs: el<HTMLDivElement>("work-tabs"),
     messageList: el<HTMLUListElement>("message-list"),
@@ -62,7 +66,7 @@ const els = {
     resultBody: el<HTMLTableSectionElement>("result-body"),
     statusText: el<HTMLSpanElement>("status-text"),
     runStatus: el<HTMLSpanElement>("run-status"),
-    inputHint: el<HTMLSpanElement>("input-hint"),
+    toolbarStatus: el<HTMLSpanElement>("toolbar-status"),
     btnLoadMore: el<HTMLButtonElement>("btn-load-more"),
     btnLoadAll: el<HTMLButtonElement>("btn-load-all"),
     saveResultsWrap: el<HTMLSpanElement>("save-results-wrap"),
@@ -71,6 +75,8 @@ const els = {
     selSaveFormat: el<HTMLSelectElement>("sel-save-format"),
     resultSubtabs: el<HTMLDivElement>("result-subtabs"),
 };
+
+const toolbarStatus = createToolbarStatus(els.toolbarStatus, () => activeTab()?.connectionId ?? null);
 
 // --- Color mode (light/dark/system) ---
 type ThemeMode = "light" | "dark" | "system";
@@ -142,6 +148,7 @@ function applyL10nToStaticDom(): void {
     setText("btn-prompt", t("main.prompt", "Prompt"));
     setTitle("btn-prompt", t("html.promptTitle", "Prompt CL command (F4)"));
     setTitle("btn-script-open", t("html.openScriptTitle", "Open a .sql script into the editor (Ctrl/Cmd+O)"));
+    setTitle("btn-reload-script", t("html.reloadInitialScript", "Reload initial SQL script"));
     setTitle("btn-script-save", t("html.saveScriptTitle", "Save the editor as a .sql file (Ctrl/Cmd+S)"));
     setTitle("splitter", t("html.splitterTitle", "Drag to resize"));
     setText("btn-load-more", t("html.loadMore", "Load more"));
@@ -317,11 +324,58 @@ const SETTING_DEFS: SettingDef[] = [
         persist: (v) => App()?.SetAppSetting("defaultNaming", v) ?? Promise.resolve(),
     },
     {
-        key: "excelDateTimeFormats",
+        key: "editorOptions",
         type: "group",
         get: () => "",
         withValue: (s) => s,
         controls: [
+            {
+                key: "editorSqlHighlighting",
+                type: "toggle",
+                get: () => localStorage.getItem("ibmi-runsql-sql-highlighting") === "off" ? "off" : "on",
+                withValue: (s) => s,
+                persist: async (value) => { localStorage.setItem("ibmi-runsql-sql-highlighting", value); },
+            },
+            {
+                key: "editorFontSize",
+                type: "number",
+                min: 9,
+                max: 24,
+                get: () => localStorage.getItem("ibmi-runsql-editor-font-size") || "13",
+                withValue: (s) => s,
+                persist: async (value) => { localStorage.setItem("ibmi-runsql-editor-font-size", value); },
+            },
+            {
+                key: "editorStopColor",
+                type: "color",
+                get: () => localStorage.getItem("ibmi-runsql-editor-stop-color") || (document.documentElement.dataset.theme === "dark" ? "#ff7777" : "#c62828"),
+                withValue: (s) => s,
+                persist: async (value) => { localStorage.setItem("ibmi-runsql-editor-stop-color", value); },
+            },
+            {
+                key: "editorCommentColor",
+                type: "color",
+                get: () => localStorage.getItem("ibmi-runsql-editor-comment-color") || (document.documentElement.dataset.theme === "dark" ? "#76d18c" : "#18783a"),
+                withValue: (s) => s,
+                persist: async (value) => { localStorage.setItem("ibmi-runsql-editor-comment-color", value); },
+            },
+            ...clColorSettings(),
+        ],
+    },
+    {
+        key: "excelExportOptions",
+        type: "group",
+        get: () => "",
+        withValue: (s) => s,
+        controls: [
+            {
+                key: "excelColumnHeading",
+                type: "choice",
+                options: [["fieldName", "Field Name"], ["columnHeading", "Column Heading"]],
+                get: (s) => s.excelColumnHeading || "columnHeading",
+                withValue: (s, v) => ({ ...s, excelColumnHeading: v as AppSettings["excelColumnHeading"] }),
+                persist: (v) => App()?.SetAppSetting("excelColumnHeading", v) ?? Promise.resolve(),
+            },
             {
                 key: "excelDateFormat",
                 type: "choice",
@@ -422,6 +476,7 @@ const SETTING_DEFS: SettingDef[] = [
         persist: (v) => App()?.SetAppSetting("connTabLabel", v) ?? Promise.resolve(),
     },
 ];
+let connectionsPane: ReturnType<typeof createConnectionsPane> | undefined;
 {
     const app = App();
     const host = document.getElementById("pane-settings");
@@ -446,6 +501,11 @@ const SETTING_DEFS: SettingDef[] = [
                 else if (key === "spoolDblClickAction") spoolDblClickAction = (value || "view") as SpoolDblClickAction;
                 else if (key === "defaultNaming") el<HTMLSelectElement>("in-naming").value = value || "system";
                 else if (key === "resultsFontSize") applyResultsFontSize(Number(value) || 12);
+                else if (key === "editorStopColor") document.documentElement.style.setProperty("--editor-stop-color", value);
+                else if (key === "editorCommentColor") document.documentElement.style.setProperty("--editor-comment-color", value);
+                else if (key === "editorClCommandColor" || key === "editorClKeywordColor" || key === "editorClValueColor") applyClColorSetting(key, value);
+                else if (key === "editorFontSize") document.documentElement.style.setProperty("--editor-font-size", `${value}px`);
+                else if (key === "editorSqlHighlighting") els.sqlInput.setSqlHighlighting(value === "on");
                 else if (key === "spoolMaxRows") appSettingsCache = { ...appSettingsCache, spoolMaxRows: Number(value) || 0 };
                 else if (key === "confirmSpoolDelete") confirmSpoolDelete = value !== "off";
                 else if (key === "ctrlEnterRun") ctrlEnterRun = value === "on";
@@ -458,6 +518,13 @@ const SETTING_DEFS: SettingDef[] = [
     // it lives in localStorage like the theme).
     const savedFont = localStorage.getItem("ibmi-runsql-results-font");
     if (savedFont) applyResultsFontSize(Number(savedFont) || 12);
+    const savedStopColor = localStorage.getItem("ibmi-runsql-editor-stop-color");
+    const savedCommentColor = localStorage.getItem("ibmi-runsql-editor-comment-color");
+    const savedEditorFont = localStorage.getItem("ibmi-runsql-editor-font-size");
+    if (savedStopColor) document.documentElement.style.setProperty("--editor-stop-color", savedStopColor);
+    if (savedCommentColor) document.documentElement.style.setProperty("--editor-comment-color", savedCommentColor);
+    if (savedEditorFont) document.documentElement.style.setProperty("--editor-font-size", `${savedEditorFont}px`);
+    restoreClColors();
     // --- Connections pane: profile editor (connections.ts) ---
     const connHost = document.getElementById("pane-connections");
     if (app && connHost) {
@@ -471,6 +538,7 @@ const SETTING_DEFS: SettingDef[] = [
             onConnect: (p) => void connectToProfile(p),
             onReorder: (names) => app.ReorderConnectionProfiles(names),
         });
+        connectionsPane = pane;
         connHost.appendChild(pane.root);
     }
 }
@@ -1336,6 +1404,7 @@ interface ConnectionTab {
     host?: string;
     user?: string;
     profileName?: string;
+    initialScriptReady?: boolean;
     snapshot?: ResultSnapshot;
 }
 
@@ -1630,7 +1699,7 @@ async function addDetachedTab(connectionId: string): Promise<void> {
     const tab = addTab();
     tab.connectionId = connectionId;
     let ws: {
-        label?: string; editorText?: string; statusText?: string; messagesHtml?: string;
+        label?: string; editorText?: string; initialEditorText?: string; statusText?: string; messagesHtml?: string;
         columns?: ColumnInfo[]; rows?: unknown[][]; cursorId?: string; more?: boolean; showingResults?: boolean;
         pinnedResults?: PinnedResult[];
     } = {};
@@ -1640,6 +1709,7 @@ async function addDetachedTab(connectionId: string): Promise<void> {
         // workspace gone: keep the bare tab
     }
     tab.label = ws.label ?? t("main.connection", "Connection");
+    tab.initialScriptReady = typeof ws.initialEditorText === "string";
     const showingResults = !!ws.showingResults && !!ws.columns;
     tab.snapshot = {
         editorText: ws.editorText ?? "",
@@ -1680,6 +1750,7 @@ if (!detachedConnId) {
 
 function switchTab(key: string): void {
     if (activeTabKey === key) return;
+    els.sqlInput.clearRunningStatement();
     void persistEditorScript();
     snapshotActiveTab();
     activeTabKey = key;
@@ -1715,6 +1786,7 @@ async function closeTab(key: string): Promise<void> {
 
 function syncConnectionUi(): void {
     const tab = activeTab();
+    toolbarStatus.sync();
     const connected = !!tab?.connectionId;
     els.badge.textContent = connected
         ? `${tab!.label} - ${t("main.connected", "Connected")}`
@@ -1733,6 +1805,7 @@ function syncConnectionUi(): void {
     els.btnRunAll.disabled = !connected;
     els.btnRunFrom.disabled = !connected;
     els.btnPrompt.disabled = !connected;
+    el<HTMLButtonElement>("btn-reload-script").disabled = !connected || !tab?.initialScriptReady;
     els.btnPinResult.disabled = true; // needs a result set, not just a connection
     els.btnCancel.disabled = true;
     els.connectPanel.hidden = connected;
@@ -1764,6 +1837,7 @@ function setConnected(info: ConnectResponse): void {
     const tab = activeTab();
     if (!tab) return;
     tab.connectionId = info.connectionId;
+    tab.initialScriptReady = false;
     tab.host = info.host;
     tab.user = info.user;
     // Match the saved profile (for the tab name/tooltip) by host+user.
@@ -2385,6 +2459,8 @@ function showCLResult(result: CLResult): void {
 async function doConnect(): Promise<void> {
     const app = App();
     if (!app) return;
+    if (connectionsPane && !await connectionsPane.commit()) return;
+    await loadProfiles();
     els.connectError.hidden = true;
     els.btnConnect.disabled = true;
     // Connecting status on the profile-hint line under GO (dominant styling).
@@ -2413,15 +2489,15 @@ async function doConnect(): Promise<void> {
         });
         setConnected(info);
         // Auto-save (MRU) on successful connect — no Save button needed.
-        void saveProfile();
-        // Script recall: this connection's saved editor text returns when the
-        // editor is blank and the profile's save-script toggle is on.
-        const prof = profiles.find((p) =>
+        await saveProfile();
+        const prof = matchProf && profiles.find((p) =>
             p.host.toLowerCase() === info.host.toLowerCase()
             && p.user.toLowerCase() === info.user.toLowerCase());
-        if (prof?.saveScript !== false && prof?.script && !els.sqlInput.value.trim()) {
-            els.sqlInput.value = prof.script;
-        }
+        els.sqlInput.value = scriptForConnection(prof, els.sqlInput.value);
+        await app.SetInitialEditorText(info.connectionId, els.sqlInput.value);
+        const connectedTab = tabs.find((tab) => tab.connectionId === info.connectionId);
+        if (connectedTab) connectedTab.initialScriptReady = true;
+        syncConnectionUi();
         // Spooled Files: preload at connect when the setting is on; otherwise
         // leave the list empty so opening the tab (or Refresh) fetches it.
         spoolState.loadedFor = "";
@@ -2429,6 +2505,7 @@ async function doConnect(): Promise<void> {
         if (preloadSpoolList) {
             void refreshSpool(spool.filters());
         }
+        toolbarStatus.show(t("main.connectedTo", "Connected to {target}").replace("{target}", `${info.user}@${info.host}`), info.connectionId);
     } catch (err) {
         els.btnConnect.disabled = false;
         // Failed connect: re-arm GO so it can be pressed again immediately.
@@ -2551,6 +2628,8 @@ async function doDisconnect(): Promise<void> {
     const app = App();
     const tab = activeTab();
     if (!app || !tab?.connectionId) return;
+    if (connectionsPane && !await connectionsPane.commit()) return;
+    await loadProfiles();
     await persistEditorScript();
     const connId = tab.connectionId;
     try {
@@ -2584,7 +2663,8 @@ async function doDisconnect(): Promise<void> {
 // actionLabel is the ACS-style verb for the log ("Run Selected...", etc.).
 async function runOne(text: string, actionLabel = t("main.logRunSelected", "Run Selected...")): Promise<void> {
     const app = App();
-    if (!app || !activeTab()?.connectionId) return;
+    const connectionId = activeTab()?.connectionId;
+    if (!app || !connectionId) return;
     inputHistories.for(activeTab()?.connectionId).push(text);
     await persistEditorScript(); // keep the per-connection script current on every run
     // Persisted per-connection history (powers the picker; survives restarts).
@@ -2644,11 +2724,16 @@ async function runOne(text: string, actionLabel = t("main.logRunSelected", "Run 
             lastResultSql = sqlResult.kind === "rows" ? text : "";
             showSqlResult(sqlResult);
         }
+        const status = (result as SqlResult).kind === "error"
+            ? t("main.statementFailed", "Statement failed")
+            : els.statusText.textContent ?? "";
+        toolbarStatus.show(status, connectionId);
     } catch (err) {
         const elapsed = Math.round(performance.now() - started);
         logExecution(actionLabel, text, t("main.logStatementFailed", "Statement failed{state}   ({ms} ms)").replace("{state}", "").replace("{ms}", String(elapsed)));
         showMessages([], String((err as Error)?.message ?? err));
         els.statusText.textContent = t("main.error", "Error");
+        toolbarStatus.show(t("main.statementFailed", "Statement failed"), connectionId);
         throw err;
     }
 }
@@ -2694,7 +2779,7 @@ function runTimerStartNow(base: string, totalStart = 0): void {
     runTimerStart = performance.now();
     if (totalStart > 0) runTimerTotalStart = totalStart;
     els.runStatus.hidden = false;
-    els.inputHint.hidden = true; // free the space while the timer shows
+    els.toolbarStatus.hidden = true;
     runTimerTick();
     if (runTimerId === undefined) {
         runTimerId = setInterval(runTimerTick, 500);
@@ -2709,7 +2794,7 @@ function runTimerStop(): void {
     runTimerTotalStart = 0;
     els.runStatus.hidden = true;
     els.runStatus.textContent = "";
-    els.inputHint.hidden = false;
+    els.toolbarStatus.hidden = false;
 }
 
 // Run Selected: selection if any, else statement at caret; nothing in empty space.
@@ -2719,19 +2804,34 @@ async function doRun(): Promise<void> {
     const selStart = els.sqlInput.selectionStart ?? 0;
     const selEnd = els.sqlInput.selectionEnd ?? 0;
     let text: string;
+    let start: number;
+    let end: number;
     if (selEnd > selStart) {
         text = src.slice(selStart, selEnd).trim();
+        start = selStart;
+        end = selEnd;
     } else {
         const stmt = statementAt(src, selStart);
         if (!stmt) return; // caret in empty space: nothing runs
         text = stmt.text;
+        start = stmt.start;
+        end = stmt.end + (src[stmt.end] === ";" ? 1 : 0);
     }
     if (!text) return;
+    const selectedStatements = splitStatements(text);
+    if (selectedStatements.length === 1 && isStopStatement(selectedStatements[0].text)) {
+        logStop();
+        els.statusText.textContent = t("main.stopCurrent", "STOP encountered — no statement run.");
+        toolbarStatus.show(els.statusText.textContent, activeTab()?.connectionId ?? "");
+        return;
+    }
     setRunning(true);
     runTimerStartNow(t("main.running", "Running..."));
     try {
+        els.sqlInput.highlightRunningStatement(start, end);
         await runOne(text, t("main.logRunSelected", "Run Selected..."));
     } finally {
+        els.sqlInput.clearRunningStatement();
         runTimerStop();
         setRunning(false);
     }
@@ -2744,45 +2844,56 @@ function logStop(): void {
     appendLogLine(`[ ${nowStamp()} ]  ${t("main.logStop", "STOP encountered — ending the run.")}`, "msg-info");
 }
 
-// Move the editor caret to a statement's start offset so it tracks the running
-// statement (and lands on the STOP line when a batch halts there). Does NOT
-// steal focus — Run buttons keep working. Scrolls the caret's line into view.
-function setCaretToOffset(offset: number): void {
-    const ta = els.sqlInput;
-    ta.setSelectionRange(offset, offset);
-    // Scroll the caret's line into view without focusing the textarea.
-    const lineHeight = parseFloat(getComputedStyle(ta).lineHeight) || 18;
-    const line = ta.value.slice(0, offset).split("\n").length - 1;
-    const targetTop = line * lineHeight;
-    if (targetTop < ta.scrollTop || targetTop > ta.scrollTop + ta.clientHeight - lineHeight) {
-        ta.scrollTop = Math.max(0, targetTop - ta.clientHeight / 2);
+function moveBatchCaret(source: string, connectionId: string | null | undefined, offset: number): void {
+    if (activeTab()?.connectionId !== connectionId || els.sqlInput.value !== source) return;
+    els.sqlInput.setSelectionRange(offset, offset);
+    els.sqlInput.scrollToOffset(offset);
+}
+
+function focusBatchCaret(source: string, connectionId: string | null | undefined): void {
+    if (activeTab()?.connectionId !== connectionId || els.sqlInput.value !== source) return;
+    const focused = document.activeElement;
+    if (focused === document.body || focused === null || els.sqlInput.view.hasFocus || document.getElementById("run-controls")?.contains(focused)) {
+        els.sqlInput.focus();
     }
 }
 
 async function doRunAll(): Promise<void> {
     if (!activeTab()?.connectionId || state.running) return;
-    const stmts = splitStatements(els.sqlInput.value);
+    const source = els.sqlInput.value;
+    const connectionId = activeTab()?.connectionId;
+    const stmts = splitStatements(source);
     if (!stmts.length) return;
     setRunning(true);
     const batchStart = performance.now();
     try {
         for (let i = 0; i < stmts.length; i += 1) {
-            setCaretToOffset(stmts[i].start);
             if (isStopStatement(stmts[i].text)) {
+                moveBatchCaret(source, connectionId, stmts[i].start);
                 logStop();
                 els.statusText.textContent = t("main.stoppedAt", "Stopped at STOP (statement {current} of {total}).").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
                 return;
             }
             const label = t("main.runningStatementOf", "Running statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
             runTimerStartNow(label, i === 0 ? batchStart : 0);
-            await runOne(stmts[i].text, t("main.logRunAllStatement", "Run All — statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length)));
+            if (activeTab()?.connectionId === connectionId && els.sqlInput.value === source) {
+                els.sqlInput.highlightRunningStatement(stmts[i].start, stmts[i].end + (source[stmts[i].end] === ";" ? 1 : 0));
+            }
+            try {
+                await runOne(stmts[i].text, t("main.logRunAllStatement", "Run All — statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length)));
+                moveBatchCaret(source, connectionId, stmts[i + 1]?.start ?? (stmts[i].end + (source[stmts[i].end] === ";" ? 1 : 0)));
+            } finally {
+                els.sqlInput.clearRunningStatement();
+            }
         }
         els.statusText.textContent = t("main.statementsCompleted", "{count} statements completed.").replace("{count}", String(stmts.length));
     } catch {
         // runOne already surfaced the error; stop the batch.
     } finally {
+        els.sqlInput.clearRunningStatement();
         runTimerStop();
         setRunning(false);
+        focusBatchCaret(source, connectionId);
     }
 }
 
@@ -2790,6 +2901,7 @@ async function doRunAll(): Promise<void> {
 async function doRunFromSelected(): Promise<void> {
     if (!activeTab()?.connectionId || state.running) return;
     const src = els.sqlInput.value;
+    const connectionId = activeTab()?.connectionId;
     const pos = els.sqlInput.selectionStart ?? 0;
     const stmts = statementsFrom(src, pos);
     if (!stmts.length) return;
@@ -2797,22 +2909,32 @@ async function doRunFromSelected(): Promise<void> {
     const batchStart = performance.now();
     try {
         for (let i = 0; i < stmts.length; i += 1) {
-            setCaretToOffset(stmts[i].start);
             if (isStopStatement(stmts[i].text)) {
+                moveBatchCaret(src, connectionId, stmts[i].start);
                 logStop();
                 els.statusText.textContent = t("main.stoppedAt", "Stopped at STOP (statement {current} of {total}).").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
                 return;
             }
             const label = t("main.runningStatementOf", "Running statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length));
             runTimerStartNow(label, i === 0 ? batchStart : 0);
-            await runOne(stmts[i].text, t("main.logRunFromStatement", "Run from Selected — statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length)));
+            if (activeTab()?.connectionId === connectionId && els.sqlInput.value === src) {
+                els.sqlInput.highlightRunningStatement(stmts[i].start, stmts[i].end + (src[stmts[i].end] === ";" ? 1 : 0));
+            }
+            try {
+                await runOne(stmts[i].text, t("main.logRunFromStatement", "Run from Selected — statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length)));
+                moveBatchCaret(src, connectionId, stmts[i + 1]?.start ?? (stmts[i].end + (src[stmts[i].end] === ";" ? 1 : 0)));
+            } finally {
+                els.sqlInput.clearRunningStatement();
+            }
         }
         els.statusText.textContent = t("main.statementsCompleted", "{count} statements completed.").replace("{count}", String(stmts.length));
     } catch {
         // stop batch on failure
     } finally {
+        els.sqlInput.clearRunningStatement();
         runTimerStop();
         setRunning(false);
+        focusBatchCaret(src, connectionId);
     }
 }
 
@@ -2851,6 +2973,7 @@ async function doCancel(): Promise<void> {
     const app = App();
     const connId = activeTab()?.connectionId;
     if (!app || !connId) return;
+    els.sqlInput.clearRunningStatement();
     try {
         await app.CancelSQL(connId);
     } catch {
@@ -3065,6 +3188,7 @@ async function persistEditorScript(): Promise<void> {
     const tab = activeTab();
     const app = App();
     if (!app || !tab?.connectionId) return;
+    const text = els.sqlInput.value;
     let host = "";
     let user = "";
     try {
@@ -3078,10 +3202,10 @@ async function persistEditorScript(): Promise<void> {
     const prof = profiles.find((p) =>
         p.host.toLowerCase() === host && p.user.toLowerCase() === user);
     if (!prof || prof.saveScript === false) return;
-    if ((prof.script ?? "") === els.sqlInput.value) return;
+    if ((prof.sessionScript ?? "") === text) return;
     try {
-        await app.UpdateConnectionProfile(prof.name, { ...prof, script: els.sqlInput.value });
-        prof.script = els.sqlInput.value;
+        await app.SaveConnectionSessionScript(host, user, text);
+        prof.sessionScript = text;
     } catch { /* best effort */ }
 }
 
@@ -3141,6 +3265,20 @@ async function saveEditorScriptAs(): Promise<void> {
     }
 }
 
+document.getElementById("btn-reload-script")?.addEventListener("click", () => {
+    const connectionId = activeTab()?.connectionId;
+    if (!connectionId) return;
+    void reloadInitialScript(
+        confirmReloadInitialScript,
+        async () => ((await App().GetWorkspace(connectionId)) as { initialEditorText: string }).initialEditorText,
+        (text) => {
+            if (activeTab()?.connectionId !== connectionId) return;
+            els.sqlInput.value = text;
+            pushWorkspaceState();
+            els.sqlInput.focus();
+        },
+    ).catch((err) => showMessages([], String((err as Error)?.message ?? err)));
+});
 document.getElementById("btn-script-open")?.addEventListener("click", () => void openScriptIntoEditor());
 document.getElementById("btn-script-save")?.addEventListener("click", () => void saveEditorScriptAs());
 document.addEventListener("keydown", (ev: KeyboardEvent) => {
@@ -3211,27 +3349,6 @@ els.sqlInput.addEventListener("keydown", (ev: KeyboardEvent) => {
     if (ev.key === "F6") {
         ev.preventDefault();
         void openHistoryPicker();
-    }
-    // Home/End: text-editor semantics — column 1 / end of the caret's line.
-    // (WKWebView textarea leaves these as no-ops on macOS.)
-    if ((ev.key === "Home" || ev.key === "End") && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
-        const ta = els.sqlInput;
-        const pos = ta.selectionStart ?? 0;
-        const text = ta.value;
-        const lineStart = text.lastIndexOf("\n", pos - 1) + 1;
-        const nl = text.indexOf("\n", pos);
-        const lineEnd = nl === -1 ? text.length : nl;
-        const target = ev.key === "Home" ? lineStart : lineEnd;
-        ev.preventDefault();
-        if (ev.shiftKey) {
-            // Shift extends the selection from the existing anchor.
-            const anchor = ta.selectionDirection === "backward" ? ta.selectionEnd : ta.selectionStart;
-            const [a, b] = anchor === pos ? [Math.min(pos, target), Math.max(pos, target)] : [Math.min(anchor, target), Math.max(anchor, target)];
-            ta.setSelectionRange(a, b);
-        } else {
-            ta.setSelectionRange(target, target);
-        }
-        return;
     }
     handleHistoryKeydown(ev);
 });
@@ -3520,7 +3637,7 @@ if (detachedConnId) {
     });
 
     interface WorkspaceMirror {
-        label?: string; editorText?: string; statusText?: string; messagesHtml?: string;
+        label?: string; editorText?: string; initialEditorText?: string; statusText?: string; messagesHtml?: string;
         columns?: ColumnInfo[]; rows?: unknown[][]; cursorId?: string; more?: boolean; showingResults?: boolean;
         pinnedResults?: PinnedResult[];
     }
@@ -3529,6 +3646,10 @@ if (detachedConnId) {
     // overwritten when it differs, so our own keystrokes (echoed back via
     // UpdateEditorText) never reset the caret.
     const applyWorkspace = (ws: WorkspaceMirror): void => {
+        if (typeof ws.initialEditorText === "string" && !tab.initialScriptReady) {
+            tab.initialScriptReady = true;
+            syncConnectionUi();
+        }
         if (ws.label) {
             tab.label = ws.label;
             els.badge.textContent = t("main.detachedBadge", "{label} (detached)").replace("{label}", ws.label);

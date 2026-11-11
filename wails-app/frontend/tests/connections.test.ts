@@ -1,6 +1,7 @@
 // Connections pane: profile list + edit form.
 import { describe, expect, it, vi } from "vitest";
 import { createConnectionsPane } from "../src/connections";
+import { scriptForConnection } from "../src/sessionScript";
 import type { ConnectionProfile } from "../src/types";
 
 const P1: ConnectionProfile = {
@@ -33,6 +34,45 @@ const fields = (root: HTMLElement) =>
     [...root.querySelectorAll<HTMLInputElement | HTMLSelectElement>(".conn-field input, .conn-field select, .conn-field .switch")];
 
 describe("connections pane", () => {
+    it("commits an unchecked auto-restore switch before reconnecting", async () => {
+        let saved: ConnectionProfile = { ...P1, savePassword: false, script: "startup", sessionScript: "last session" };
+        const { pane } = mkPane([saved], {
+            load: async () => [saved],
+            save: async (_name, profile) => { saved = { ...saved, ...profile }; },
+        });
+        await vi.waitFor(() => expect(pane.root.querySelector(".conn-keys .settings-key")).toBeTruthy());
+        const toggle = pane.root.querySelector<HTMLElement>('[role="switch"][aria-label="Auto Save/Restore SQL Script between connections"]')!;
+        expect(toggle.getAttribute("aria-checked")).toBe("true");
+        toggle.click();
+        expect(await pane.commit()).toBe(true);
+        expect(saved.saveScript).toBe(false);
+        expect(scriptForConnection(saved, "last session")).toBe("startup");
+        pane.root.remove();
+    });
+
+    it("saves pending profile edits before Connect in new Tab", async () => {
+        let saved: ConnectionProfile = { ...P1, savePassword: false, script: "startup", sessionScript: "last session" };
+        const onConnect = vi.fn();
+        const { pane } = mkPane([saved], {
+            load: async () => [saved],
+            save: async (_name, profile) => { saved = { ...saved, ...profile }; },
+            onConnect,
+        });
+        await vi.waitFor(() => expect(pane.root.querySelector(".conn-keys .settings-key")).toBeTruthy());
+        pane.root.querySelector<HTMLElement>('[role="switch"][aria-label="Auto Save/Restore SQL Script between connections"]')!.click();
+        [...pane.root.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Connect in new Tab")!.click();
+        await vi.waitFor(() => expect(onConnect).toHaveBeenCalledWith(expect.objectContaining({ saveScript: false, script: "startup" })));
+        pane.root.remove();
+    });
+    it("labels the separate startup and automatic session script options", async () => {
+        const { pane } = mkPane([{ ...P1, script: "startup", sessionScript: "last session" }]);
+        await vi.waitFor(() => expect(pane.root.querySelector(".conn-script")).toBeTruthy());
+        expect(pane.root.textContent).toContain("Auto Save/Restore SQL Script between connections");
+        expect(pane.root.textContent).toContain("Startup SQL Script (does not auto-run)");
+        expect(pane.root.textContent).toContain("Ignored when Auto Save/Restore SQL Script is on.");
+        expect(pane.root.querySelector<HTMLTextAreaElement>(".conn-script")?.value).toBe("startup");
+        pane.root.remove();
+    });
     it("lists profiles and selects the first", async () => {
         const { pane } = mkPane();
         await vi.waitFor(() => {

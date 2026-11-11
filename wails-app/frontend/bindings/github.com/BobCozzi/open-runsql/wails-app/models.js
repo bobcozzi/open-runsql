@@ -59,6 +59,13 @@ export class AppSettings {
         }
         if (/** @type {any} */(false)) {
             /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["excelColumnHeading"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
              * locale | iso | us | eu ("" = locale)
              * @member
              * @type {string | undefined}
@@ -544,8 +551,6 @@ export class ConnectionProfile {
         }
         if (/** @type {any} */(false)) {
             /**
-             * Script: SQL/CL text saved with the profile; restored into the editor on
-             * connect when set. SaveScript gates the auto-save (default on).
              * @member
              * @type {string | undefined}
              */
@@ -557,6 +562,13 @@ export class ConnectionProfile {
              * @type {boolean | null | undefined}
              */
             this["saveScript"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["sessionScript"] = undefined;
         }
         if (/** @type {any} */(false)) {
             /**
@@ -1856,6 +1868,13 @@ export class WorkspaceState {
              */
             this["editorText"] = "";
         }
+        if (!("initialEditorText" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["initialEditorText"] = "";
+        }
         if (!("columns" in $$source)) {
             /**
              * @member
@@ -1922,18 +1941,18 @@ export class WorkspaceState {
      * @returns {WorkspaceState}
      */
     static createFrom($$source = {}) {
-        const $$createField3_0 = $$createType3;
-        const $$createField4_0 = $$createType5;
-        const $$createField10_0 = $$createType12;
+        const $$createField4_0 = $$createType3;
+        const $$createField5_0 = $$createType5;
+        const $$createField11_0 = $$createType12;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
-            $$parsedSource["columns"] = $$createField3_0($$parsedSource["columns"]);
+            $$parsedSource["columns"] = $$createField4_0($$parsedSource["columns"]);
         }
         if ("rows" in $$parsedSource) {
-            $$parsedSource["rows"] = $$createField4_0($$parsedSource["rows"]);
+            $$parsedSource["rows"] = $$createField5_0($$parsedSource["rows"]);
         }
         if ("pinnedResults" in $$parsedSource) {
-            $$parsedSource["pinnedResults"] = $$createField10_0($$parsedSource["pinnedResults"]);
+            $$parsedSource["pinnedResults"] = $$createField11_0($$parsedSource["pinnedResults"]);
         }
         return new WorkspaceState(/** @type {Partial<WorkspaceState>} */($$parsedSource));
     }

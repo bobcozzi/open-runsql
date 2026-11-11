@@ -403,6 +403,16 @@ export function SaveConnectionProfile(p) {
 }
 
 /**
+ * @param {string} host
+ * @param {string} user
+ * @param {string} script
+ * @returns {$CancellablePromise<void>}
+ */
+export function SaveConnectionSessionScript(host, user, script) {
+    return $Call.ByID(2286252399, host, user, script);
+}
+
+/**
  * SaveFileAs prompts with the OS-native Save dialog (default name/folder, file
  * filter for the chosen format) and writes base64 content to the chosen path.
  * Returns "" when the user cancels.
@@ -448,6 +458,15 @@ export function SaveXLSXAs(filename, columns, rows) {
  */
 export function SetAppSetting(key, value) {
     return $Call.ByID(3589657050, key, value);
+}
+
+/**
+ * @param {string} connectionID
+ * @param {string} text
+ * @returns {$CancellablePromise<void>}
+ */
+export function SetInitialEditorText(connectionID, text) {
+    return $Call.ByID(479063003, connectionID, text);
 }
 
 /**

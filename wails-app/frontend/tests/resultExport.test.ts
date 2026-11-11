@@ -18,13 +18,18 @@ const ROWS: unknown[][] = [
 ];
 
 describe("formatResultData", () => {
-    it("CSV quotes delimiters/quotes/newlines, joins stacked headings", () => {
+    it("CSV uses field names and quotes delimiters/quotes/newlines", () => {
         const out = formatResultData(COLS, ROWS, "csv");
         expect(out).toBe(
-            'ID,Customer Name,NOTE\n' +
+            'ID,NAME,NOTE\n' +
             '1,Acme,plain\n' +
             '2,"A, B Co","has ""quotes"""\n' +
             '3,,"line\nbreak"\n');
+    });
+
+    it("CSV falls back to the heading when the field name is missing", () => {
+        expect(formatResultData([{ name: "", label: "Customer\nName" }], [], "csv")).toBe("Customer Name\n");
+        expect(formatResultData([{ name: "  ", label: "Customer Name" }], [], "csv")).toBe("Customer Name\n");
     });
 
     it("TSV uses tabs and quotes only tabs/quotes/newlines (not commas)", () => {
@@ -89,8 +94,8 @@ describe("preferred Save As format", () => {
     it("persists and restores a supported format", () => {
         localStorage.clear();
         expect(loadPreferredSaveFormat()).toBeUndefined();
-        persistPreferredSaveFormat("xlsx");
-        expect(loadPreferredSaveFormat()).toBe("xlsx");
+        persistPreferredSaveFormat("csv");
+        expect(loadPreferredSaveFormat()).toBe("csv");
     });
 
     it("ignores unsupported stored or requested formats", () => {

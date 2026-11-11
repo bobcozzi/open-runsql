@@ -39,6 +39,25 @@ describe("index.html layout", () => {
         expect(pinCount).toBe(1);
     });
 
+    it("places the initial-script reload icon between History and Open", () => {
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        const history = doc.querySelector("#btn-history")!;
+        const reload = doc.querySelector("#btn-reload-script")!;
+        expect(history.nextElementSibling).toBe(reload);
+        expect(reload.nextElementSibling?.id).toBe("btn-script-open");
+        expect(reload.getAttribute("title")).toBe("Reload initial SQL script");
+        expect(reload.getAttribute("aria-label")).toBe("Reload initial SQL script");
+        expect(reload.querySelector("svg")).toBeTruthy();
+    });
+
+    it("provides an initially empty toolbar status instead of the SQL hint", () => {
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        const status = doc.querySelector<HTMLElement>("#toolbar-status")!;
+        expect(status.textContent).toBe("");
+        expect(status.getAttribute("role")).toBe("status");
+        expect(doc.querySelector("#input-hint")).toBeNull();
+    });
+
     it("has the result-grid essentials (subtabs strip, table, save/export, delimiter)", () => {
         for (const id of [
             "result-subtabs", "result-table", "result-head", "result-body",
@@ -47,5 +66,12 @@ describe("index.html layout", () => {
         ]) {
             expect(html, `missing "${id}"`).toContain(`id="${id}"`);
         }
+    });
+
+    it("lists XLSX first and selects it by default", () => {
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        const select = doc.querySelector<HTMLSelectElement>("#sel-save-format")!;
+        expect([...select.options].map((option) => option.value)).toEqual(["xlsx", "csv", "tsv", "json", "md"]);
+        expect(select.value).toBe("xlsx");
     });
 });

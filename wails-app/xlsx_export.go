@@ -145,7 +145,7 @@ func buildXLSXWithSettings(columns []ColumnInfo, rows [][]any, settings AppSetti
 		return nil, err
 	}
 
-	widths := xlsxColumnWidths(columns, rows)
+	widths := xlsxColumnWidths(columns, rows, settings.ExcelColumnHeading)
 	for colIndex, width := range widths {
 		columnName, _ := excelize.ColumnNumberToName(colIndex + 1)
 		if err := workbook.SetColWidth(sheet, columnName, columnName, width); err != nil {
@@ -160,7 +160,7 @@ func buildXLSXWithSettings(columns []ColumnInfo, rows [][]any, settings AppSetti
 		}
 		header := make([]interface{}, len(columns))
 		for i, column := range columns {
-			header[i] = excelize.Cell{Value: xlsxColumnName(column), StyleID: headerStyle}
+			header[i] = excelize.Cell{Value: xlsxColumnName(column, settings.ExcelColumnHeading), StyleID: headerStyle}
 		}
 		if err := stream.SetRow("A1", header); err != nil {
 			return nil, err
@@ -185,7 +185,7 @@ func buildXLSXWithSettings(columns []ColumnInfo, rows [][]any, settings AppSetti
 	} else {
 		for colIndex, column := range columns {
 			cellName, _ := excelize.CoordinatesToCellName(colIndex+1, 1)
-			if err := workbook.SetCellValue(sheet, cellName, xlsxColumnName(column)); err != nil {
+			if err := workbook.SetCellValue(sheet, cellName, xlsxColumnName(column, settings.ExcelColumnHeading)); err != nil {
 				return nil, err
 			}
 			if err := workbook.SetCellStyle(sheet, cellName, cellName, headerStyle); err != nil {
@@ -488,17 +488,22 @@ func xlsxCell(value any, column ColumnInfo, dateStyle, timeStyle, timestampStyle
 	return excelize.Cell{Value: fmt.Sprint(value)}, nil
 }
 
-func xlsxColumnName(column ColumnInfo) string {
-	if column.Name != "" {
-		return column.Name
+func xlsxColumnName(column ColumnInfo, choice string) string {
+	name := strings.TrimSpace(column.Name)
+	label := strings.Join(strings.Fields(column.Label), " ")
+	if choice != "fieldName" && label != "" {
+		return label
 	}
-	return column.Label
+	if name != "" {
+		return name
+	}
+	return label
 }
 
-func xlsxColumnWidths(columns []ColumnInfo, rows [][]any) []float64 {
+func xlsxColumnWidths(columns []ColumnInfo, rows [][]any, choice string) []float64 {
 	widths := make([]float64, len(columns))
 	for index, column := range columns {
-		width := float64(len([]rune(xlsxColumnName(column))) + 2)
+		width := float64(len([]rune(xlsxColumnName(column, choice))) + 2)
 		if width < 10 {
 			width = 10
 		}
