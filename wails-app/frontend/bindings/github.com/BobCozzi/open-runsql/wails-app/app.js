@@ -429,6 +429,17 @@ export function SaveSpooledFile(filename, base64Data) {
 }
 
 /**
+ * SaveXLSXAs writes a result set through the native Save dialog.
+ * @param {string} filename
+ * @param {$models.ColumnInfo[]} columns
+ * @param {any[][]} rows
+ * @returns {$CancellablePromise<string>}
+ */
+export function SaveXLSXAs(filename, columns, rows) {
+    return $Call.ByID(815548619, filename, columns, rows);
+}
+
+/**
  * SetAppSetting persists one settings key. Unknown keys are rejected; values
  * are validated here so the frontend editors stay dumb.
  * @param {string} key

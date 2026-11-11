@@ -192,6 +192,9 @@ export interface AppSettings {
     autoOpenDownloads?: boolean; // legacy; superseded by spoolDblClickAction
     spoolDblClickAction?: "" | "view" | "dlPdf" | "dlText" | "print"; // "" = view
     defaultNaming?: "" | "sql" | "system"; // "" = sql
+    excelDateFormat?: "" | "locale" | "iso" | "us" | "eu";
+    excelTimeFormat?: "" | "locale" | "24h" | "12h";
+    excelTimestampFormat?: "" | "locale" | "iso" | "us" | "eu" | "ibmi" | "ibmiDot";
     spoolMaxRows?: number; // 0/undefined = unlimited
     confirmSpoolDelete?: boolean; // undefined = on
     ctrlEnterRun?: boolean; // undefined/false = off (Ctrl/Cmd+Enter runs current statement)
@@ -219,6 +222,7 @@ export interface AppBinding {
     GetSpooledFileData(req: SpooledFileTarget & { format: string }): Promise<SpooledFileDataResult>;
     SaveSpooledFile(filename: string, base64Data: string): Promise<string>;
     SaveFileAs(filename: string, base64Data: string, filterLabel: string, filterPattern: string): Promise<string>;
+    SaveXLSXAs(filename: string, columns: ColumnInfo[], rows: unknown[][]): Promise<string>;
     OpenFileAs(filterLabel: string, filterPattern: string): Promise<string>;
     PrintSpooledFile(filename: string, base64Data: string): Promise<string>;
     OpenSpooledFile(path: string): Promise<void>;

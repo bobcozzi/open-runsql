@@ -20,6 +20,36 @@ const DEFS: SettingDef[] = [
     },
 ];
 
+const EXCEL_FORMAT_DEFS: SettingDef[] = [{
+    key: "excelDateTimeFormats",
+    type: "group",
+    get: () => "",
+    withValue: (s) => s,
+    controls: [
+        {
+            key: "excelDateFormat", type: "choice",
+            options: [["locale", "Locale"], ["iso", "ISO"], ["us", "U.S."], ["eu", "Day-first"]],
+            get: (s) => s.excelDateFormat || "locale",
+            withValue: (s, v) => ({ ...s, excelDateFormat: v as AppSettings["excelDateFormat"] }),
+            persist: vi.fn(() => Promise.resolve()),
+        },
+        {
+            key: "excelTimeFormat", type: "choice",
+            options: [["locale", "Locale"], ["24h", "24-hour"], ["12h", "12-hour"]],
+            get: (s) => s.excelTimeFormat || "locale",
+            withValue: (s, v) => ({ ...s, excelTimeFormat: v as AppSettings["excelTimeFormat"] }),
+            persist: vi.fn(() => Promise.resolve()),
+        },
+        {
+            key: "excelTimestampFormat", type: "choice",
+            options: [["locale", "Locale"], ["iso", "ISO"], ["us", "U.S."], ["eu", "Day-first"]],
+            get: (s) => s.excelTimestampFormat || "locale",
+            withValue: (s, v) => ({ ...s, excelTimestampFormat: v as AppSettings["excelTimestampFormat"] }),
+            persist: vi.fn(() => Promise.resolve()),
+        },
+    ],
+}];
+
 function mkPane(over: Partial<Parameters<typeof createSettingsPane>[0]> = {}) {
     const opts = {
         load: () => Promise.resolve<AppSettings>({}),
@@ -53,6 +83,28 @@ describe("settings pane", () => {
         expect(input.type).toBe("number");
         expect(input.min).toBe("10");
         expect(input.max).toBe("500");
+        pane.root.remove();
+    });
+
+    it("shows grouped Excel formats under one key and persists each choice independently", async () => {
+        const pane = createSettingsPane({
+            load: () => Promise.resolve({ excelDateFormat: "locale", excelTimeFormat: "24h", excelTimestampFormat: "iso" }),
+            save: vi.fn(() => Promise.resolve()),
+        }, EXCEL_FORMAT_DEFS);
+        document.body.appendChild(pane.root);
+
+        await vi.waitFor(() => {
+            expect(pane.root.querySelectorAll(".settings-key").length).toBe(1);
+            expect(pane.root.querySelectorAll(".settings-group-row").length).toBe(3);
+        });
+        expect(pane.root.querySelectorAll<HTMLSelectElement>(".settings-group-row select").length).toBe(3);
+        const dateSelect = pane.root.querySelector<HTMLSelectElement>("#setting-excelDateFormat")!;
+        expect(dateSelect.value).toBe("locale");
+        dateSelect.value = "us";
+        dateSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        await vi.waitFor(() => {
+            expect(EXCEL_FORMAT_DEFS[0].controls?.[0].persist).toHaveBeenCalledWith("us");
+        });
         pane.root.remove();
     });
 

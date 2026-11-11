@@ -27,14 +27,12 @@ build:
 
 # Distribution builds (stripped, shareable). Naming: common platforms get the
 # plain base name; rare ones get a suffix. macOS builds keep CGO on (webview
-# requires it); Windows/Linux cross-compile clean with CGO off.
+# requires it); Windows cross-compiles cleanly with CGO off.
 #   ibmi-runsql           macOS Apple Silicon (also the local dev name)
 #   ibmi-runsql-macIntel  macOS Intel (rare; build on demand)
 #   ibmi-runsql.exe       Windows amd64
-#   ibmi-runsql-linux     Linux amd64
 dist: frontend winres
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -tags production -ldflags "-s -w" -o ibmi-runsql.exe .
-	CGO_ENABLED=0 GOOS=linux   GOARCH=amd64 go build -tags production -ldflags "-s -w" -o ibmi-runsql-linux .
 	GOOS=darwin GOARCH=arm64 go build -tags production -ldflags "-s -w" -o ibmi-runsql .
 	# Intel Mac (only when someone asks):
 	# GOOS=darwin GOARCH=amd64 go build -tags production -ldflags "-s -w" -o ibmi-runsql-macIntel .
@@ -44,6 +42,7 @@ dist: frontend winres
 # symlink, and packs a compressed UDZO image. Output: ibmi-runsql.dmg
 dmg:
 	go build -tags production -ldflags "-s -w" -o ibmi-runsql.app/Contents/MacOS/ibmi-runsql .
+	codesign --force --deep --sign - ibmi-runsql.app
 	rm -rf /tmp/dmg-stage ibmi-runsql.dmg
 	mkdir -p /tmp/dmg-stage
 	cp -R ibmi-runsql.app /tmp/dmg-stage/

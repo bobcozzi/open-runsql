@@ -119,6 +119,19 @@ class MainTest {
     }
 
     @Test
+    void valueNodePreservesOversizedIntegersAsText() throws Throwable {
+        JsonNode longValue = valueNode(9_007_199_254_740_993L);
+        assertTrue(longValue.isTextual());
+        assertEquals("9007199254740993", longValue.asText());
+
+        JsonNode bigInteger = valueNode(new java.math.BigInteger("1234567890123456789"));
+        assertTrue(bigInteger.isTextual());
+        assertEquals("1234567890123456789", bigInteger.asText());
+
+        assertTrue(valueNode(42L).isNumber());
+    }
+
+    @Test
     void valueNodeMapsPrimitivesAndStrings() throws Throwable {
         assertEquals(42, valueNode(42).asInt());
         assertTrue(valueNode(Boolean.TRUE).asBoolean());
@@ -399,6 +412,34 @@ class MainTest {
                 });
     }
 
+    private static ResultSet fakeTimeResultSet(String timeText) {
+        ResultSetMetaData md = (ResultSetMetaData) Proxy.newProxyInstance(
+                MainTest.class.getClassLoader(), new Class<?>[] { ResultSetMetaData.class },
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getColumnCount" -> 1;
+                    case "getColumnName", "getColumnLabel" -> "CLOCK";
+                    case "getColumnType" -> Types.TIME;
+                    case "getColumnTypeName" -> "TIME";
+                    case "getPrecision", "getColumnDisplaySize" -> 15;
+                    case "getScale" -> 6;
+                    case "isNullable" -> ResultSetMetaData.columnNullable;
+                    case "isAutoIncrement" -> false;
+                    case "getSchemaName", "getTableName" -> "";
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        int[] position = { 0 };
+        return (ResultSet) Proxy.newProxyInstance(
+                MainTest.class.getClassLoader(), new Class<?>[] { ResultSet.class },
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getMetaData" -> md;
+                    case "next" -> ++position[0] == 1;
+                    case "getString" -> timeText;
+                    case "getObject" -> java.sql.Time.valueOf("13:14:15");
+                    case "isAfterLast" -> position[0] > 1;
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+    }
+
     private static Object newCursor(ResultSet rs) throws Exception {
         Class<?> cursorClass = Class.forName("com.cozziresearch.ibmi.bridge.Main$Cursor");
         Constructor<?> ctor = cursorClass.getDeclaredConstructor(Statement.class, ResultSet.class);
@@ -445,6 +486,14 @@ class MainTest {
 
         ObjectNode second = readBatch(cursor, 200);
         assertEquals(first.get("columns"), second.get("columns"), "metadata must be reused, not rebuilt");
+    }
+
+    @Test
+    void readBatchPreservesFractionalTimeFromJdbcString() throws Throwable {
+        Object cursor = newCursor(fakeTimeResultSet("13:14:15.123456"));
+        JsonNode value = readBatch(cursor, 1).get("rows").get(0).get(0);
+        assertTrue(value.isTextual());
+        assertEquals("13:14:15.123456", value.asText());
     }
 
     @Test

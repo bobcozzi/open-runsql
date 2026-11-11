@@ -378,14 +378,17 @@ func profileStorePath() string {
 // --- App settings (spool download dir, ...; persisted next to profiles) ---
 
 type AppSettings struct {
-	SpoolDownloadDir    string `json:"spoolDownloadDir,omitempty"`
-	ScriptsDir          string `json:"scriptsDir,omitempty"`
-	FetchSize           int    `json:"fetchSize,omitempty"`
-	AutoOpenDownloads   *bool  `json:"autoOpenDownloads,omitempty"`   // legacy; superseded by SpoolDblClickAction
-	SpoolDblClickAction string `json:"spoolDblClickAction,omitempty"` // view | dlPdf | dlText | print ("" = view)
-	DefaultNaming       string `json:"defaultNaming,omitempty"`       // sql | system ("" = sql)
-	SpoolMaxRows        int    `json:"spoolMaxRows,omitempty"`        // 0 = unlimited
-	ConfirmSpoolDelete  *bool  `json:"confirmSpoolDelete,omitempty"`  // nil = on
+	SpoolDownloadDir     string `json:"spoolDownloadDir,omitempty"`
+	ScriptsDir           string `json:"scriptsDir,omitempty"`
+	FetchSize            int    `json:"fetchSize,omitempty"`
+	AutoOpenDownloads    *bool  `json:"autoOpenDownloads,omitempty"`    // legacy; superseded by SpoolDblClickAction
+	SpoolDblClickAction  string `json:"spoolDblClickAction,omitempty"`  // view | dlPdf | dlText | print ("" = view)
+	DefaultNaming        string `json:"defaultNaming,omitempty"`        // sql | system ("" = sql)
+	ExcelDateFormat      string `json:"excelDateFormat,omitempty"`      // locale | iso | us | eu ("" = locale)
+	ExcelTimeFormat      string `json:"excelTimeFormat,omitempty"`      // locale | 24h | 12h ("" = locale)
+	ExcelTimestampFormat string `json:"excelTimestampFormat,omitempty"` // locale | iso | us | eu ("" = locale)
+	SpoolMaxRows         int    `json:"spoolMaxRows,omitempty"`         // 0 = unlimited
+	ConfirmSpoolDelete   *bool  `json:"confirmSpoolDelete,omitempty"`   // nil = on
 	// CtrlEnterRun gates the Ctrl/Cmd+Enter "run current statement" shortcut
 	// (ACS has no such key, so it's opt-in). nil/false = off.
 	CtrlEnterRun *bool `json:"ctrlEnterRun,omitempty"`
@@ -445,6 +448,27 @@ func (a *App) SetAppSetting(key, value string) error {
 			}
 		}
 		s.SpoolDownloadDir = d
+	case "excelDateFormat":
+		switch strings.TrimSpace(value) {
+		case "", "locale", "iso", "us", "eu", "mdy", "mdyy", "dmy", "dmyy", "ymd", "yymd":
+			s.ExcelDateFormat = strings.TrimSpace(value)
+		default:
+			return fmt.Errorf("invalid Excel date format: %s", value)
+		}
+	case "excelTimeFormat":
+		switch strings.TrimSpace(value) {
+		case "", "locale", "24h", "12h", "iso", "iso12":
+			s.ExcelTimeFormat = strings.TrimSpace(value)
+		default:
+			return fmt.Errorf("invalid Excel time format: %s", value)
+		}
+	case "excelTimestampFormat":
+		switch strings.TrimSpace(value) {
+		case "", "locale", "iso", "us", "eu", "ibmi", "ibmiDot":
+			s.ExcelTimestampFormat = strings.TrimSpace(value)
+		default:
+			return fmt.Errorf("invalid Excel timestamp format: %s", value)
+		}
 	case "scriptsDir":
 		d := strings.TrimSpace(value)
 		if d != "" {

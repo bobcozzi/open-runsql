@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatResultData, unescapeDelimiter } from "../src/resultExport";
+import {
+    formatResultData,
+    loadPreferredSaveFormat,
+    persistPreferredSaveFormat,
+    unescapeDelimiter,
+} from "../src/resultExport";
 
 const COLS = [
     { name: "ID", label: "ID" },
@@ -77,5 +82,22 @@ describe("formatResultData", () => {
     it("CSV honors an escaped tab delimiter typed into the box", () => {
         const out = formatResultData([{ name: "A", label: "A" }, { name: "B", label: "B" }], [["1", "2"]], "csv", unescapeDelimiter("\\t"));
         expect(out).toBe("A\tB\n1\t2\n");
+    });
+});
+
+describe("preferred Save As format", () => {
+    it("persists and restores a supported format", () => {
+        localStorage.clear();
+        expect(loadPreferredSaveFormat()).toBeUndefined();
+        persistPreferredSaveFormat("xlsx");
+        expect(loadPreferredSaveFormat()).toBe("xlsx");
+    });
+
+    it("ignores unsupported stored or requested formats", () => {
+        localStorage.clear();
+        persistPreferredSaveFormat("unknown");
+        expect(localStorage.getItem("ibmi-runsql-save-format")).toBeNull();
+        localStorage.setItem("ibmi-runsql-save-format", "unknown");
+        expect(loadPreferredSaveFormat()).toBeUndefined();
     });
 });

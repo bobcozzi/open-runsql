@@ -59,6 +59,30 @@ export class AppSettings {
         }
         if (/** @type {any} */(false)) {
             /**
+             * locale | iso | us | eu ("" = locale)
+             * @member
+             * @type {string | undefined}
+             */
+            this["excelDateFormat"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * locale | 24h | 12h ("" = locale)
+             * @member
+             * @type {string | undefined}
+             */
+            this["excelTimeFormat"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * locale | iso | us | eu ("" = locale)
+             * @member
+             * @type {string | undefined}
+             */
+            this["excelTimestampFormat"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
              * 0 = unlimited
              * @member
              * @type {number | undefined}
@@ -85,7 +109,7 @@ export class AppSettings {
         if (/** @type {any} */(false)) {
             /**
              * ConnTabLabel: connection-tab label format. "" / "userHost" (default) |
-             * "nameHost" | "nameUserHost" | "name".
+             * "nameHost" | "nameUserHost" | "nameUser" | "hostUser" | "name".
              * @member
              * @type {string | undefined}
              */

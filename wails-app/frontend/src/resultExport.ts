@@ -7,7 +7,8 @@ export interface ResultColumn {
     label: string;
 }
 
-export type SaveFormat = "csv" | "tsv" | "json" | "md";
+export type TextSaveFormat = "csv" | "tsv" | "json" | "md";
+export type SaveFormat = TextSaveFormat | "xlsx";
 
 /** Interpret common backslash escapes in a delimiter box value: \t tab,
  * \n newline, \r carriage return, \\ backslash, \s space, \| pipe, \; and \:
@@ -35,7 +36,28 @@ export const SAVE_FORMATS: { id: SaveFormat; label: string; ext: string }[] = [
     { id: "tsv", label: "TSV (tab-separated)", ext: "tsv" },
     { id: "json", label: "JSON", ext: "json" },
     { id: "md", label: "Markdown table", ext: "md" },
+    { id: "xlsx", label: "XLSX", ext: "xlsx" },
 ];
+
+const SAVE_FORMAT_STORAGE_KEY = "ibmi-runsql-save-format";
+
+export function loadPreferredSaveFormat(): SaveFormat | undefined {
+    try {
+        const value = localStorage.getItem(SAVE_FORMAT_STORAGE_KEY);
+        return SAVE_FORMATS.some((format) => format.id === value) ? value as SaveFormat : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+export function persistPreferredSaveFormat(format: string): void {
+    if (!SAVE_FORMATS.some((entry) => entry.id === format)) return;
+    try {
+        localStorage.setItem(SAVE_FORMAT_STORAGE_KEY, format);
+    } catch {
+        // Storage may be unavailable in restricted webview contexts.
+    }
+}
 
 function cellText(v: unknown): string {
     if (v === null || v === undefined) return "";
@@ -56,7 +78,7 @@ function heading(c: ResultColumn): string {
     return (c.label || c.name).replace(/\n+/g, " ").trim();
 }
 
-export function formatResultData(cols: ResultColumn[], rows: unknown[][], format: SaveFormat, delimOverride?: string): string {
+export function formatResultData(cols: ResultColumn[], rows: unknown[][], format: TextSaveFormat, delimOverride?: string): string {
     const heads = cols.map(heading);
     if (format === "json") {
         const out = rows.map((r) => {

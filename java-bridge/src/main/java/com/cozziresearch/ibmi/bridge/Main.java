@@ -937,7 +937,9 @@ public final class Main {
         while (count < fetchSize && rs.next()) {
             ArrayNode row = JSON.createArrayNode();
             for (int i = 1; i <= md.getColumnCount(); i++) {
-                Object value = rs.getObject(i);
+                int columnType = md.getColumnType(i);
+                Object value = columnType == Types.TIME || columnType == Types.TIME_WITH_TIMEZONE
+                        ? rs.getString(i) : rs.getObject(i);
                 row.add(valueNode(value));
             }
             rows.add(row);
@@ -959,6 +961,12 @@ public final class Main {
         if (value instanceof java.sql.Time t) return JSON.getNodeFactory().textNode(t.toString());
         // Exact decimal text avoids double rounding for NUMERIC/DECIMAL/DECFLOAT.
         if (value instanceof java.math.BigDecimal bd) return JSON.getNodeFactory().textNode(bd.toPlainString());
+        // Keep oversized integral values exact across Go and browser JSON number handling.
+        if (value instanceof Long || value instanceof java.math.BigInteger) {
+            String integer = value.toString();
+            String digits = integer.startsWith("-") ? integer.substring(1) : integer;
+            if (digits.length() > 15) return JSON.getNodeFactory().textNode(integer);
+        }
         if (value instanceof Blob blob) {
             try {
                 long len = blob.length();

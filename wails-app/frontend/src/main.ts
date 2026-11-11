@@ -28,7 +28,7 @@ import { buildSpooledFileRequest, createSpoolPane, isAfpdsFile, type SpoolFilter
 import { createSettingsPane, createSwitch, type SettingDef } from "./settings";
 import { createConnectionsPane } from "./connections";
 import { renderScsBytes, formatOsVersion } from "./scsRender";
-import { formatResultData, unescapeDelimiter, type SaveFormat } from "./resultExport";
+import { formatResultData, loadPreferredSaveFormat, persistPreferredSaveFormat, unescapeDelimiter, type SaveFormat } from "./resultExport";
 import { showHistoryPicker } from "./stmtHistory";
 import type { SpooledFileInfo } from "./types";
 import { t } from "./l10n";
@@ -315,6 +315,62 @@ const SETTING_DEFS: SettingDef[] = [
         get: (s) => s.defaultNaming || "system",
         withValue: (s, v) => ({ ...s, defaultNaming: v as AppSettings["defaultNaming"] }),
         persist: (v) => App()?.SetAppSetting("defaultNaming", v) ?? Promise.resolve(),
+    },
+    {
+        key: "excelDateTimeFormats",
+        type: "group",
+        get: () => "",
+        withValue: (s) => s,
+        controls: [
+            {
+                key: "excelDateFormat",
+                type: "choice",
+                options: [
+                    ["locale", "Locale default"],
+                    ["iso", "ISO 8601 (YYYY-MM-DD)"],
+                    ["us", "U.S. (MM/DD/YYYY)"],
+                    ["eu", "Day-first (DD/MM/YYYY)"],
+                    ["mdy", "*MDY (MM/DD/YY)"],
+                    ["mdyy", "*MDYY (MM/DD/YYYY)"],
+                    ["dmy", "*DMY (DD/MM/YY)"],
+                    ["dmyy", "*DMYY (DD/MM/YYYY)"],
+                    ["ymd", "*YMD (YY/MM/DD)"],
+                    ["yymd", "*YYMD (YYYY/MM/DD)"],
+                ],
+                get: (s) => s.excelDateFormat || "locale",
+                withValue: (s, v) => ({ ...s, excelDateFormat: v as AppSettings["excelDateFormat"] }),
+                persist: (v) => App()?.SetAppSetting("excelDateFormat", v) ?? Promise.resolve(),
+            },
+            {
+                key: "excelTimeFormat",
+                type: "choice",
+                options: [
+                    ["locale", "Locale default"],
+                    ["24h", "24-hour (HH:MM:SS)"],
+                    ["12h", "12-hour (H:MM:SS AM/PM)"],
+                    ["iso12", "*ISO12 (HH.MM.SS AM/PM)"],
+                    ["iso", "*ISO (HH.MM.SS)"],
+                ],
+                get: (s) => s.excelTimeFormat || "locale",
+                withValue: (s, v) => ({ ...s, excelTimeFormat: v as AppSettings["excelTimeFormat"] }),
+                persist: (v) => App()?.SetAppSetting("excelTimeFormat", v) ?? Promise.resolve(),
+            },
+            {
+                key: "excelTimestampFormat",
+                type: "choice",
+                options: [
+                    ["locale", "Locale default"],
+                    ["iso", "ISO 8601 (YYYY-MM-DDTHH:MM:SS.000)"],
+                    ["us", "U.S. (MM/DD/YYYY H:MM:SS AM/PM)"],
+                    ["eu", "Day-first (DD/MM/YYYY HH:MM:SS)"],
+                    ["ibmi", "U.S. time separators (YYYY-MM-DD HH:MM:SS)"],
+                    ["ibmiDot", "IBM i ISO (YYYY-MM-DD HH.MM.SS)"],
+                ],
+                get: (s) => s.excelTimestampFormat || "locale",
+                withValue: (s, v) => ({ ...s, excelTimestampFormat: v as AppSettings["excelTimestampFormat"] }),
+                persist: (v) => App()?.SetAppSetting("excelTimestampFormat", v) ?? Promise.resolve(),
+            },
+        ],
     },
     {
         key: "resultsFontSize",
@@ -2206,7 +2262,7 @@ function updateStatus(kind: string, result: SqlResult | undefined, totalRows: nu
     els.btnLoadMore.hidden = !state.more;
     els.btnLoadAll.hidden = !state.more;
     // Save-as: only meaningful with rows on screen.
-    els.saveResultsWrap.hidden = !(kind === "rows" && totalRows > 0);
+    els.saveResultsWrap.hidden = !(kind === "rows" && state.columns.length > 0);
     // Load more/all page the live cursor — not applicable to a frozen pin.
     const pinnedView = !!activePinnedId;
     if (pinnedView) { els.btnLoadMore.hidden = true; els.btnLoadAll.hidden = true; }
@@ -2216,12 +2272,15 @@ function updateStatus(kind: string, result: SqlResult | undefined, totalRows: nu
 // Save the result grid: native Save dialog (name + location), chosen format.
 // Delimiter override applies to CSV only (TAB/JSON/Markdown have fixed layouts).
 const inSaveDelim = el<HTMLInputElement>("in-save-delim");
+const preferredSaveFormat = loadPreferredSaveFormat();
+if (preferredSaveFormat) els.selSaveFormat.value = preferredSaveFormat;
 function syncSaveDelimVisibility(): void {
     const isCsv = els.selSaveFormat.value === "csv";
     inSaveDelim.hidden = !isCsv;
     if (isCsv && !inSaveDelim.dataset.touched) inSaveDelim.value = ",";
 }
 els.selSaveFormat.addEventListener("change", () => {
+    persistPreferredSaveFormat(els.selSaveFormat.value);
     // Reset to the comma default on switch unless the user typed a custom one.
     delete inSaveDelim.dataset.touched;
     syncSaveDelimVisibility();
@@ -2233,19 +2292,25 @@ els.btnSaveResults.addEventListener("click", () => {
     void (async () => {
         const app = App();
         const { columns, rows } = displayedData();
-        if (!app || columns.length === 0 || rows.length === 0) return;
+        if (!app || columns.length === 0) return;
         const format = els.selSaveFormat.value as SaveFormat;
-        const delim = (format === "csv" && inSaveDelim.value.length > 0) ? unescapeDelimiter(inSaveDelim.value) : undefined;
-        const text = formatResultData(columns, rows, format, delim);
         const pinned = pinnedResults.find((r) => r.id === activePinnedId);
         const base = pinned ? pinned.label.replace(/[^A-Za-z0-9_.-]+/g, "_") : `results_${activeTab()?.label?.split("@")[1] || "results"}`;
         const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
-        const filterLabel = format.toUpperCase();
         try {
+            if (format === "xlsx") {
+                const saved = await app.SaveXLSXAs(`${base}_${stamp}.xlsx`, columns, rows);
+                if (!saved) return;
+                appendLogLine(t("spool.logSaved", "Saved to {path}").replace("{path}", saved), "msg-info", true);
+                els.statusText.textContent = t("spool.statusSaved", "Saved {path}").replace("{path}", saved);
+                return;
+            }
+            const delim = (format === "csv" && inSaveDelim.value.length > 0) ? unescapeDelimiter(inSaveDelim.value) : undefined;
+            const text = formatResultData(columns, rows, format, delim);
             const saved = await app.SaveFileAs(
                 `${base}_${stamp}.${format}`,
                 btoa(unescape(encodeURIComponent(text))),
-                filterLabel, `*.${format}`);
+                format.toUpperCase(), `*.${format}`);
             if (!saved) return; // canceled
             appendLogLine(t("spool.logSaved", "Saved to {path}").replace("{path}", saved), "msg-info", true);
             els.statusText.textContent = t("spool.statusSaved", "Saved {path}").replace("{path}", saved);

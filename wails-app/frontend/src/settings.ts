@@ -51,7 +51,7 @@ export function createSwitch(initial = false, ariaLabel = ""): SwitchControl {
     return sw;
 }
 
-export type SettingType = "text" | "number" | "folder" | "choice" | "toggle";
+export type SettingType = "text" | "number" | "folder" | "choice" | "toggle" | "group";
 
 export interface SettingDef {
     /** Stable key; also the l10n suffix (settings.<key>.label / .desc). */
@@ -64,10 +64,12 @@ export interface SettingDef {
     max?: number;
     /** Choice options: [value, label] pairs (labels may be l10n keys). */
     options?: [string, string][];
+    /** Child settings displayed together in one editor. */
+    controls?: SettingDef[];
     /** Read the current value out of AppSettings ("" when unset). */
-    get: (s: AppSettings) => string;
+    get?: (s: AppSettings) => string;
     /** Produce the settings object to persist with the new value applied. */
-    withValue: (s: AppSettings, value: string) => AppSettings;
+    withValue?: (s: AppSettings, value: string) => AppSettings;
     /** Folder-type helper: "..." opens the OS folder picker; returns the
      * chosen path ("" = canceled, input untouched). Picking a path commits. */
     browse?: () => Promise<string>;
@@ -112,7 +114,11 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
     const itemFor = new Map<string, HTMLLIElement>();
 
     function current(def: SettingDef): string {
-        return def.get(settings);
+        return def.get?.(settings) ?? "";
+    }
+
+    function updatedSettings(def: SettingDef, value: string): AppSettings {
+        return def.withValue?.({ ...settings }, value) ?? settings;
     }
 
     function renderEditor(def: SettingDef): void {
@@ -144,9 +150,9 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
                     if (def.persist) {
                         await def.persist(value);
                     } else {
-                        await opts.save(def.withValue({ ...settings }, value));
+                        await opts.save(updatedSettings(def, value));
                     }
-                    settings = def.withValue({ ...settings }, value);
+                    settings = updatedSettings(def, value);
                     opts.onSaved?.();
                     opts.onChanged?.(def.key, value);
                 } catch (err) {
@@ -158,6 +164,56 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
             row.appendChild(sw);
             row.appendChild(stateHint);
             editor.appendChild(row);
+            return;
+        }
+
+        if (def.type === "group") {
+            const group = document.createElement("div");
+            group.className = "settings-group";
+            for (const control of def.controls ?? []) {
+                const controlRow = document.createElement("div");
+                controlRow.className = "settings-group-row";
+                const label = document.createElement("label");
+                label.className = "settings-group-label";
+                label.htmlFor = `setting-${control.key}`;
+                label.textContent = t(`settings.${control.key}.label`, control.key);
+
+                const select = document.createElement("select");
+                select.id = label.htmlFor;
+                select.className = "settings-input";
+                for (const [value, text] of control.options ?? []) {
+                    const option = document.createElement("option");
+                    option.value = value;
+                    option.textContent = text;
+                    select.appendChild(option);
+                }
+                select.value = current(control);
+                select.addEventListener("change", () => {
+                    void (async () => {
+                        const value = select.value;
+                        if (value === current(control)) return;
+                        const next = updatedSettings(control, value);
+                        try {
+                            if (control.persist) await control.persist(value);
+                            else await opts.save(next);
+                            settings = next;
+                            opts.onSaved?.();
+                            opts.onChanged?.(control.key, value);
+                        } catch (err) {
+                            opts.onError?.(String((err as Error)?.message ?? err));
+                            select.value = current(control);
+                        }
+                    })();
+                });
+                controlRow.append(label, select);
+                group.appendChild(controlRow);
+            }
+            editor.appendChild(group);
+
+            const desc = document.createElement("div");
+            desc.className = "settings-desc";
+            desc.textContent = t(`settings.${def.key}.desc`, "");
+            if (desc.textContent) editor.appendChild(desc);
             return;
         }
 
@@ -203,9 +259,9 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
                 if (def.persist) {
                     await def.persist(value);
                 } else {
-                    await opts.save(def.withValue({ ...settings }, value));
+                    await opts.save(updatedSettings(def, value));
                 }
-                settings = def.withValue({ ...settings }, value);
+                settings = updatedSettings(def, value);
                 opts.onSaved?.();
                 opts.onChanged?.(def.key, value);
             } catch (err) {

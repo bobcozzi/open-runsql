@@ -10,7 +10,7 @@ import {
     shouldRightAlign,
     sortValue,
 } from "./sqltypes";
-import { formatResultData, unescapeDelimiter, type SaveFormat } from "./resultExport";
+import { formatResultData, unescapeDelimiter, type TextSaveFormat } from "./resultExport";
 import type { ColumnInfo } from "./types";
 
 interface PinnedPayload {
@@ -183,7 +183,7 @@ el<HTMLButtonElement>("btn-pinned-save").addEventListener("click", () => {
         const { App } = await import("./types");
         const app = App();
         if (!app || payload.columns.length === 0 || payload.rows.length === 0) return;
-        const format = selFormat.value as SaveFormat;
+        const format = selFormat.value as TextSaveFormat;
         const delim = (format === "csv" && inDelim.value.length > 0) ? unescapeDelimiter(inDelim.value) : undefined;
         const text = formatResultData(payload.columns, payload.rows, format, delim);
         const base = payload.label.replace(/[^A-Za-z0-9_.-]+/g, "_");
