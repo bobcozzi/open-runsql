@@ -9,12 +9,12 @@
 
 ### Changed
 - Separated the user-defined Startup SQL Script from automatically saved session text. With Auto Save/Restore on, the last session is restored; with it off, the startup script initializes the editor. Neither runs automatically.
-- Added an Excel column heading choice between field names and result column headings. CSV uses field names, and XLSX is the default Save As format for new users while existing format choices remain saved.
-- Home and End move to the start and end of the current editor line on every platform. Batch runs move the caret to the next statement, the end of the final statement, or immediately before STOP.
+- Added an Excel column heading choice between field names and result column headings. CSV still uses field names. XLSX is now the initial Save As format for new users while existing user's format choice remain saved between sessions.
+- Keyboard behavior on all platforms is now "correct". (i.e., HOME and END move to the start and end of the current editor line on every platform. Batch runs move the caret to the next statement, the end of the final statement, or immediately before STOP.
 
 ### Fixed
 - STOP is handled locally when run as the current statement instead of being sent as a CL command.
-
+- Fixed CL-style comments which are now support (yes, /* ... */ works.)
 ## 2026-11-10
 
 ### Added
