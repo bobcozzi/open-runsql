@@ -79,6 +79,12 @@ export function isExactNumericColumn(column: ColumnInfo | undefined): boolean {
     return EXACT_CODES.has(Number(column.type));
 }
 
+function isFixedCharacterColumn(column: ColumnInfo): boolean {
+    const base = typeBase(column.typeName);
+    return base === "CHAR" || base === "CHARACTER" || base === "NCHAR" || base === "GRAPHIC"
+        || Number(column.type) === JDBC.CHAR || Number(column.type) === JDBC.NCHAR;
+}
+
 export function columnKind(column: ColumnInfo | undefined): ColumnKind {
     const base = typeBase(column?.typeName);
     if (base === "DATE") return "date";
@@ -159,6 +165,9 @@ export function formatCellText(value: unknown, column: ColumnInfo | undefined): 
             return { text: normalizeNumericTextToScale(value, scale), isNull: false };
         }
         return { text: value, isNull: false };
+    }
+    if (typeof value === "string" && column && isFixedCharacterColumn(column)) {
+        return { text: value.replace(/ +$/, ""), isNull: false };
     }
     if (typeof value === "number") {
         return { text: String(value), isNull: false };

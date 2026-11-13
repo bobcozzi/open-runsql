@@ -32,6 +32,13 @@ export interface ConnectionsPaneHandle {
     commit(): Promise<boolean>;
 }
 
+export function matchConnectionProfile(profiles: ConnectionProfile[], host: string, user: string, selectedName?: string): ConnectionProfile | undefined {
+    const matches = profiles.filter((profile) =>
+        profile.host.toLowerCase() === host.trim().toLowerCase()
+        && profile.user.toLowerCase() === user.trim().toLowerCase());
+    return matches.find((profile) => profile.name === selectedName) ?? matches[0];
+}
+
 export function createConnectionsPane(opts: ConnectionsPaneOptions): ConnectionsPaneHandle {
     const root = document.createElement("div");
     root.className = "work-pane connections";
@@ -98,6 +105,21 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
     const inTls = createSwitch(false, t("conn.tls", "Secure (TLS)"));
     const inSavePw = createSwitch(false, t("conn.savePassword", "Save password"));
     const inPreload = createSwitch(true, t("conn.preloadSpool", "Preload spooled files at connect"));
+    const inCLSupport = document.createElement("select");
+        inCLSupport.id = "conn-cl-support";
+        inCLSupport.className = "settings-input conn-cl-support";
+    for (const [value, key, fallback] of [
+        ["standard", "conn.clSupportStandard", "Standard (CommandCall)"],
+        ["qcmdexc", "conn.clSupportQcmdexc", "SQL Job no message logging (uses QCMDEXC)"],
+        ["enhanced", "conn.clSupportEnhanced", "SQL Job with message logging (uses CMD_RUN)"],
+    ] as const) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = t(key, fallback);
+        inCLSupport.appendChild(option);
+    }
+    const clSupportHint = document.createElement("div");
+    clSupportHint.className = "settings-desc conn-cl-support-hint";
     const inSaveScript = createSwitch(true, t("conn.saveScript", "Auto Save/Restore SQL Script between connections"));
     const inScript = document.createElement("textarea");
     inScript.className = "settings-input conn-script";
@@ -126,7 +148,7 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
 
     // A switch row with a live state hint to the right of the control. The hint
     // shows onText/offText (or generic On/Off when blank) and updates on change.
-    function switchRow(labelKey: string, fallback: string, sw: HTMLElement, onText: string, offText: string): void {
+    function switchRow(labelKey: string, fallback: string, sw: HTMLElement, onText: string, offText: string): () => void {
         const label = document.createElement("label");
         label.className = "conn-field";
         const span = document.createElement("span");
@@ -146,6 +168,7 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
         sw.addEventListener("change", paintHint);
         label.appendChild(wrap);
         form.appendChild(label);
+        return paintHint;
     }
 
     const title = document.createElement("div");
@@ -162,6 +185,19 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
     switchRow("conn.tls", "Secure (TLS)", inTls, t("conn.tls", "Secure (TLS)"), "");
     switchRow("conn.savePassword", "Save password", inSavePw, t("conn.savePwOn", "On — stored in the OS credential vault"), t("conn.savePwOff", "Off — not stored"));
     switchRow("conn.preloadSpool", "Preload spooled files at connect", inPreload, "", "");
+    row("conn.clSupport", "CL Support", inCLSupport);
+    form.appendChild(clSupportHint);
+    const paintCLSupportHint = () => {
+        const isQcmdexc = inCLSupport.value === "qcmdexc";
+        const isEnhanced = inCLSupport.value === "enhanced";
+        clSupportHint.textContent = isQcmdexc
+            ? t("conn.clSupportQcmdexcHint", "Runs in the SQL job, so commands can affect later SQL statements. Does not log CL messages.")
+            : isEnhanced
+                ? t("conn.clSupportEnhancedHint", "Runs in the SQL job and returns enhanced CL messages through CMD_RUN.")
+                : t("conn.clSupportStandardHint", "Runs in its own remote command job; does not affect SQL statements.");
+    };
+    paintCLSupportHint();
+    inCLSupport.addEventListener("change", () => { paintCLSupportHint(); dirtyMarker.hidden = false; });
     switchRow("conn.saveScript", "Auto Save/Restore SQL Script between connections", inSaveScript, "", "");
     row("conn.script", "Startup SQL Script (does not auto-run)", inScript);
     const scriptNote = document.createElement("div");
@@ -234,6 +270,7 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
             naming: inNaming.value,
             tls: inTls.checked,
             preloadSpool: inPreload.checked,
+            clExecutionMode: inCLSupport.value as ConnectionProfile["clExecutionMode"],
             saveScript: inSaveScript.checked,
             script: inScript.value,
             // Keeping "Save password" on preserves the stored password unless a
@@ -277,6 +314,8 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
         inTls.checked = !!p?.tls;
         inSavePw.checked = !!p?.savePassword;
         inPreload.checked = p?.preloadSpool !== false;
+        inCLSupport.value = p?.clExecutionMode || (p?.useEnhancedCLSupport === true ? "enhanced" : "standard");
+        paintCLSupportHint();
         inSaveScript.checked = p?.saveScript !== false;
         inScript.value = p?.script ?? "";
         btnDelete.hidden = !p;
@@ -461,5 +500,9 @@ export function createConnectionsPane(opts: ConnectionsPaneOptions): Connections
     fill(null);
     void reload();
 
-    return { root, reload: () => reload(origName), commit: () => dirtyMarker.hidden ? Promise.resolve(true) : save() };
+    return {
+        root,
+        reload: () => reload(origName),
+        commit: () => dirtyMarker.hidden ? Promise.resolve(true) : save(),
+    };
 }

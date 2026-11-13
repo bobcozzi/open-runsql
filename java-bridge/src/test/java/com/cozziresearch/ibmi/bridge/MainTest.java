@@ -45,6 +45,16 @@ class MainTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    @Test
+    void formatsJdbcServerJobIdentifier() {
+        assertEquals("123456/QUSER/QZDASOINIT", Main.formatServerJobIdentifier("QZDASOINITQUSER     123456"));
+        assertEquals("123456/ABCDEFGHIJ/QZDASOINIT", Main.formatServerJobIdentifier("QZDASOINITABCDEFGHIJ123456"));
+        assertEquals("123456/QUSER/QZDASOINIT", Main.formatServerJobIdentifier(" 123456 / QUSER / QZDASOINIT "));
+        assertEquals("", Main.formatServerJobIdentifier(null));
+        assertEquals("", Main.formatServerJobIdentifier("invalid"));
+        assertEquals("", Main.formatServerJobIdentifier("QZDASOINIT          123456"));
+    }
+
     /** Invokes a private static method on Main, unwrapping the real cause. */
     private static Object call(String name, Class<?>[] sig, Object... args) throws Throwable {
         Method m = Main.class.getDeclaredMethod(name, sig);
@@ -552,10 +562,10 @@ class MainTest {
     }
 
     private static Object newSession(Connection conn) throws Exception {
-        Constructor<?> ctor = sessionClass().getDeclaredConstructor(Connection.class, com.ibm.as400.access.AS400.class);
+        Constructor<?> ctor = sessionClass().getDeclaredConstructor(Connection.class, com.ibm.as400.access.AS400.class, String.class);
         ctor.setAccessible(true);
         // An unconnected AS400 object is inert: no services start until connect().
-        return ctor.newInstance(conn, new com.ibm.as400.access.AS400());
+        return ctor.newInstance(conn, new com.ibm.as400.access.AS400(), "system");
     }
 
     @SuppressWarnings("unchecked")
@@ -702,18 +712,18 @@ class MainTest {
     // fails construction immediately and deterministically.
     @Test
     void executeCLFailsFastWithoutClSystem() throws Exception {
-        Constructor<?> ctor = sessionClass().getDeclaredConstructor(Connection.class, com.ibm.as400.access.AS400.class);
+        Constructor<?> ctor = sessionClass().getDeclaredConstructor(Connection.class, com.ibm.as400.access.AS400.class, String.class);
         ctor.setAccessible(true);
-        Object session = ctor.newInstance(fakeConnection(fakeStatement(null, -1, null)), null);
+        Object session = ctor.newInstance(fakeConnection(fakeStatement(null, -1, null)), null, "system");
         assertThrows(Exception.class, () -> call("executeCL",
                 new Class<?>[] { sessionClass(), String.class }, session, "WRKSYSSTS OUTPUT(*PRINT)"));
     }
 
     @Test
     void getCmdXmlBuildsQsysPathsWithoutClSystem() throws Exception {
-        Constructor<?> ctor = sessionClass().getDeclaredConstructor(Connection.class, com.ibm.as400.access.AS400.class);
+        Constructor<?> ctor = sessionClass().getDeclaredConstructor(Connection.class, com.ibm.as400.access.AS400.class, String.class);
         ctor.setAccessible(true);
-        Object session = ctor.newInstance(fakeConnection(fakeStatement(null, -1, null)), null);
+        Object session = ctor.newInstance(fakeConnection(fakeStatement(null, -1, null)), null, "system");
         // No library: /QSYS.LIB/<CMD>.CMD
         assertThrows(Exception.class, () -> call("getCmdXml",
                 new Class<?>[] { sessionClass(), String.class, String.class }, session, "CRTLIB", ""));

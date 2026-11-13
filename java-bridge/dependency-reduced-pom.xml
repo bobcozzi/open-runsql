@@ -5,6 +5,20 @@
   <artifactId>ibmi-jdbc-bridge</artifactId>
   <version>0.1.0</version>
   <build>
+    <resources>
+      <resource>
+        <targetPath>cmd_run</targetPath>
+        <directory>${project.basedir}/../src/cmd_run</directory>
+        <includes>
+          <include>CMD_RUN.CPP</include>
+          <include>CMD_RUN.SQL</include>
+        </includes>
+      </resource>
+      <resource>
+        <filtering>true</filtering>
+        <directory>src/main/resources</directory>
+      </resource>
+    </resources>
     <finalName>ibmi-jdbc-bridge</finalName>
     <plugins>
       <plugin>

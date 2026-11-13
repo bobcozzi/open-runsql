@@ -1,10 +1,12 @@
 import { Compartment, EditorState, StateEffect, StateField } from "@codemirror/state";
-import { Decoration, EditorView, keymap, placeholder, type DecorationSet } from "@codemirror/view";
+import { Decoration, EditorView, keymap, placeholder, tooltips, type DecorationSet } from "@codemirror/view";
 import { history, historyKeymap, standardKeymap } from "@codemirror/commands";
-import { sql, SQLDialect, StandardSQL } from "@codemirror/lang-sql";
+import { sql, SQLDialect, StandardSQL, keywordCompletionSource } from "@codemirror/lang-sql";
+import { autocompletion, completionKeymap, completionStatus, acceptCompletion, closeCompletion, type CompletionSource } from "@codemirror/autocomplete";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 import { editorHighlightRanges } from "./editorHighlight";
+import { completionRequests } from "./sqlCompletion";
 
 const marks = {
     comment: Decoration.mark({ class: "editor-highlight-comment" }),
@@ -55,14 +57,42 @@ export class SqlEditor {
     readonly view: EditorView;
     private programmatic = false;
     private readonly syntaxHighlight = new Compartment();
+    private readonly completion = new Compartment();
+
+    setCompletionSource(source: CompletionSource): void {
+        const dialect = SQLDialect.define({ ...StandardSQL.spec, slashComments: true });
+        const keywords = keywordCompletionSource(dialect, true);
+        const allowed = (context: Parameters<CompletionSource>[0]) => !completionRequests(context, "").suppressed;
+        this.view.dispatch({ effects: this.completion.reconfigure(autocompletion({
+            activateOnTypingDelay: 250,
+            tooltipClass: () => "sql-completion-tooltip",
+            override: [
+                (context) => allowed(context) ? source(context) : null,
+                (context) => allowed(context) ? keywords(context) : null,
+            ],
+        })) });
+    }
+
+    consumeCompletionKey(event: KeyboardEvent): boolean {
+        if (event.ctrlKey || event.metaKey || event.altKey || completionStatus(this.view.state) === null) return false;
+        if (!["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Enter", "Tab", "Escape"].includes(event.key)) return false;
+        const binding = completionKeymap.find((entry) => entry.key === event.key);
+        const handled = event.key === "Tab" ? acceptCompletion(this.view) : binding?.run?.(this.view) ?? false;
+        if (handled || event.key === "ArrowUp" || event.key === "ArrowDown" || event.key === "Enter") {
+            event.preventDefault();
+            return true;
+        }
+        return false;
+    }
 
     constructor(parent: HTMLElement, highlightSql = true) {
         const dialect = SQLDialect.define({ ...StandardSQL.spec, slashComments: true });
         this.view = new EditorView({
             parent,
             extensions: [
+                tooltips({ parent: document.body }),
                 sql({ dialect }), this.syntaxHighlight.of(highlightSql ? syntaxHighlighting(sqlHighlightStyle) : []), highlightField, runningStatementField, EditorView.lineWrapping,
-                history(), keymap.of([...historyKeymap, ...standardKeymap]),
+                history(), this.completion.of([]), keymap.of([...completionKeymap, { key: "Tab", run: acceptCompletion }, ...historyKeymap, ...standardKeymap]),
                 placeholder("SELECT * FROM QSYS2.SYSTEM_STATUS_INFO\nCL: DSPLIBL OUTPUT(*PRINT)"),
                 EditorView.contentAttributes.of({ "aria-label": "SQL/CL script", spellcheck: "false" }),
                 EditorView.domEventHandlers({ keydown: (event) => event.defaultPrevented }),
@@ -86,6 +116,7 @@ export class SqlEditor {
 
     get value(): string { return this.view.state.doc.toString(); }
     set value(value: string) {
+        closeCompletion(this.view);
         this.programmatic = true;
         try { this.view.dispatch({ changes: { from: 0, to: this.view.state.doc.length, insert: value } }); }
         finally { this.programmatic = false; }

@@ -1,7 +1,7 @@
 {
     "name": "ibmi-runsql-frontend",
     "private": true,
-    "version": "0.1.0",
+    "version": "0.1.2",
     "type": "module",
     "scripts": {
         "dev": "vite",
@@ -16,6 +16,7 @@
         "vitest": "^3.2.7"
     },
     "dependencies": {
+        "@codemirror/autocomplete": "^6.20.4",
         "@codemirror/commands": "^6.11.1",
         "@codemirror/lang-sql": "^6.10.0",
         "@codemirror/language": "^6.13.1",

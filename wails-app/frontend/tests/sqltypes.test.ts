@@ -72,6 +72,10 @@ describe("formatCellText", () => {
         expect(formatCellText("123", c).text).toBe("123.00");
         expect(formatCellText("1.5", c).text).toBe("1.50");
     });
+    it("preserves leading CHAR spaces while removing only fixed-width right padding", () => {
+        expect(formatCellText("  source line  ", col({ type: 1, typeName: "CHAR" })).text).toBe("  source line");
+        expect(formatCellText("  value  ", col({ type: 12, typeName: "VARCHAR" })).text).toBe("  value  ");
+    });
     it("NULL handling", () => {
         expect(formatCellText(null, col({})).isNull).toBe(true);
     });

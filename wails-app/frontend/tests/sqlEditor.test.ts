@@ -1,8 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
 import { undo } from "@codemirror/commands";
+import { startCompletion, completionStatus, currentCompletions } from "@codemirror/autocomplete";
 import { SqlEditor } from "../src/sqlEditor";
 
 describe("SQL editor", () => {
+    it("shows live suggestions and lets popup keys win over history", async () => {
+        const host = document.createElement("div");
+        document.body.append(host);
+        const editor = new SqlEditor(host);
+        editor.setCompletionSource(() => ({ from: 0, options: [{ label: "SELECT", type: "keyword", boost: 10, info: "QSYS2 / OBJECT_STATISTICS" }] }));
+        editor.value = "SEL";
+        editor.setSelectionRange(3, 3);
+        startCompletion(editor.view);
+        await vi.waitFor(() => expect(completionStatus(editor.view.state)).toBe("active"));
+        await vi.waitFor(() => expect(document.body.querySelector(".sql-completion-tooltip")).not.toBeNull());
+        expect(document.body.querySelector(".sql-completion-tooltip")?.parentElement?.parentElement).toBe(document.body);
+        expect(host.querySelector(".sql-completion-tooltip")).toBeNull();
+        expect(currentCompletions(editor.view.state).some((item) => item.label === "SELECT")).toBe(true);
+        await vi.waitFor(() => expect(document.body.querySelector(".sql-completion-tooltip .cm-completionInfo")?.textContent).toBe("QSYS2 / OBJECT_STATISTICS"));
+        const arrow = new KeyboardEvent("keydown", { key: "ArrowDown", cancelable: true });
+        expect(editor.consumeCompletionKey(arrow)).toBe(true);
+        expect(arrow.defaultPrevented).toBe(true);
+        editor.value = "CL: DSPLIBL";
+        expect(completionStatus(editor.view.state)).toBeNull();
+        editor.view.destroy();
+        host.remove();
+    });
     it("marks the running statement without changing the selection and clears it on edit", () => {
         const host = document.createElement("div");
         document.body.append(host);

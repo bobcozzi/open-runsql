@@ -69,6 +69,40 @@ function mkPane(over: Partial<Parameters<typeof createSettingsPane>[0]> = {}) {
 }
 
 describe("settings pane", () => {
+    it("renders and persists grouped text settings", async () => {
+        const persist = vi.fn(async () => {});
+        const pane = createSettingsPane({ load: async () => ({}), save: async () => {} }, [{
+            key: "enhancedSupport", type: "group", controls: [{
+                key: "enhancedSupportLibrary", type: "text", get: () => "SQLTOOLS", persist,
+            }],
+        }]);
+        document.body.appendChild(pane.root);
+        await vi.waitFor(() => expect(pane.root.querySelector<HTMLInputElement>('#setting-enhancedSupportLibrary')?.value).toBe("SQLTOOLS"));
+        expect(pane.root.querySelector('label[for="setting-enhancedSupportLibrary"]')?.textContent).toBe("Function Library");
+        expect(pane.root.querySelector(".settings-group-hint")?.textContent).toBe("Preferred library for CMD_RUN; QGPL or SQLTOOLS recommended; other libraries beginning with Q are not allowed");
+        const input = pane.root.querySelector<HTMLInputElement>('#setting-enhancedSupportLibrary')!;
+        input.value = "MYLIB";
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        await vi.waitFor(() => expect(persist).toHaveBeenCalledWith("MYLIB"));
+        pane.root.remove();
+    });
+    it("shows the target-library validation error and restores the previous value", async () => {
+        const message = "enhanced support target library must not begin with Q except QGPL";
+        const onError = vi.fn();
+        const pane = createSettingsPane({ load: async () => ({}), save: async () => {}, onError }, [{
+            key: "enhancedSupport", type: "group", controls: [{
+                key: "enhancedSupportLibrary", type: "text", get: () => "SQLTOOLS", persist: async () => { throw new Error(message); },
+            }],
+        }]);
+        document.body.appendChild(pane.root);
+        await vi.waitFor(() => expect(pane.root.querySelector<HTMLInputElement>("#setting-enhancedSupportLibrary")?.value).toBe("SQLTOOLS"));
+        const input = pane.root.querySelector<HTMLInputElement>("#setting-enhancedSupportLibrary")!;
+        input.value = "QFOO";
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(message));
+        expect(input.value).toBe("SQLTOOLS");
+        pane.root.remove();
+    });
     it("persists a grouped SQL highlighting switch", async () => {
         const persist = vi.fn(async () => {});
         const onChanged = vi.fn();

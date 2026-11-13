@@ -3,6 +3,7 @@ import "./style.css";
 import { Events } from "@wailsio/runtime";
 import {
     columnHeaderLines,
+    columnKind,
     columnTooltip,
     formatCellText,
     shouldRightAlign,
@@ -26,16 +27,20 @@ import { parseCmdXml } from "./clprompter/prompterModel";
 import { showPrompter } from "./clprompter/prompterView";
 import { buildSpooledFileRequest, createSpoolPane, isAfpdsFile, type SpoolFilters } from "./spool";
 import { createSettingsPane, createSwitch, type SettingDef } from "./settings";
-import { createConnectionsPane } from "./connections";
+import { appendEnhancedSupportLog, confirmEnhancedSupport, enhancedSupportAlternativeMessage, enhancedSupportInstallationMessages, enhancedSupportLogEntry, setupEnhancedSupport } from "./enhancedSupport";
+import { createConnectionsPane, matchConnectionProfile } from "./connections";
 import { renderScsBytes, formatOsVersion } from "./scsRender";
 import { formatResultData, loadPreferredSaveFormat, persistPreferredSaveFormat, unescapeDelimiter, type SaveFormat } from "./resultExport";
 import { confirmReloadInitialScript, reloadInitialScript, scriptForConnection } from "./sessionScript";
 import { createToolbarStatus } from "./toolbarStatus";
 import { applyClColorSetting, clColorSettings, restoreClColors } from "./clColors";
 import { SqlEditor } from "./sqlEditor";
+import { createSQLCompletionSource } from "./sqlCompletion";
 import { showHistoryPicker } from "./stmtHistory";
 import type { SpooledFileInfo } from "./types";
 import { t } from "./l10n";
+import { addCLMessageDetails } from "./clMessageDetails";
+import { formatServerJob } from "./serverJob";
 
 function el<T extends HTMLElement>(id: string): T {
     const node = document.getElementById(id);
@@ -49,6 +54,7 @@ const els = {
     connectError: el<HTMLDivElement>("connect-error"),
     btnConnect: el<HTMLButtonElement>("btn-connect"),
     btnDisconnect: el<HTMLButtonElement>("btn-disconnect"),
+    serverJob: el<HTMLSpanElement>("server-job"),
     themeSelect: el<HTMLSelectElement>("sel-theme"),
     btnRun: el<HTMLButtonElement>("btn-run"),
     btnRunAll: el<HTMLButtonElement>("btn-run-all"),
@@ -246,6 +252,9 @@ function showPane(name: string): void {
         tab.classList.toggle("active", tab.dataset.pane === name);
     }
     syncEmptyState();
+    if (name === "messages") {
+        requestAnimationFrame(() => { els.messageList.scrollTop = els.messageList.scrollHeight; });
+    }
 }
 
 // --- Spooled Files pane (stage 1: list + filter + sort) ---
@@ -322,6 +331,29 @@ const SETTING_DEFS: SettingDef[] = [
         get: (s) => s.defaultNaming || "system",
         withValue: (s, v) => ({ ...s, defaultNaming: v as AppSettings["defaultNaming"] }),
         persist: (v) => App()?.SetAppSetting("defaultNaming", v) ?? Promise.resolve(),
+    },
+    {
+        key: "enhancedSupport", type: "group", controls: [
+            {
+                key: "enhancedSupportLibrary", type: "text",
+                get: (s) => s.enhancedSupportLibrary || "SQLTOOLS",
+                withValue: (s, v) => ({ ...s, enhancedSupportLibrary: v.trim().toUpperCase() || "SQLTOOLS" }),
+                persist: (v) => App()?.SetAppSetting("enhancedSupportLibrary", v) ?? Promise.resolve(),
+            },
+            {
+                key: "functionUpdateNotifications", type: "choice",
+                options: [["always", "Always"], ["newOnly", "New only"], ["updatesOnly", "Updates only"], ["noneAuto", "No notifications, auto install and update"], ["noneSkip", "No notifications, no installs or updates"]],
+                get: (s) => s.functionUpdateNotifications || "always",
+                withValue: (s, v) => ({ ...s, functionUpdateNotifications: v as AppSettings["functionUpdateNotifications"] }),
+                persist: (v) => App()?.SetAppSetting("functionUpdateNotifications", v) ?? Promise.resolve(),
+            },
+            {
+                key: "showCLMessagesInResults", type: "toggle",
+                get: (s) => s.showCLMessagesInResults ? "on" : "off",
+                withValue: (s, v) => ({ ...s, showCLMessagesInResults: v === "on" }),
+                persist: (v) => App()?.SetAppSetting("showCLMessagesInResults", v) ?? Promise.resolve(),
+            },
+        ],
     },
     {
         key: "editorOptions",
@@ -477,6 +509,7 @@ const SETTING_DEFS: SettingDef[] = [
     },
 ];
 let connectionsPane: ReturnType<typeof createConnectionsPane> | undefined;
+let settingsPane: ReturnType<typeof createSettingsPane> | undefined;
 {
     const app = App();
     const host = document.getElementById("pane-settings");
@@ -512,6 +545,7 @@ let connectionsPane: ReturnType<typeof createConnectionsPane> | undefined;
                 else if (key === "connTabLabel") { connTabLabelStyle = value || "userHost"; renderTabs(); }
             },
         }, SETTING_DEFS);
+        settingsPane = pane;
         host.appendChild(pane.root);
     }
     // Apply the persisted results font size at boot (no settings read needed —
@@ -1379,6 +1413,7 @@ interface ResultSnapshot {
     messagesHtml: string;
     messagesVisible: boolean;
     showingResults: boolean;
+    resultStatement?: string;
     // Retained (pinned) result sets + which subtab was active.
     pinnedResults?: PinnedResult[];
     activePinnedId?: string;
@@ -1403,9 +1438,15 @@ interface ConnectionTab {
     // tab label format setting and tooltip.
     host?: string;
     user?: string;
+    serverJob?: string;
     profileName?: string;
+    selectedProfileName?: string;
     initialScriptReady?: boolean;
     snapshot?: ResultSnapshot;
+    pendingMessagesHtml?: string;
+    pendingMessagesReveal?: boolean;
+    pendingResults?: Array<() => void>;
+    resultVersion?: number;
 }
 
 const state: AppState = {
@@ -1430,6 +1471,7 @@ const PIN_LABEL_MAX = 32;
 // The SQL text that produced the current live result (set in runOne). Pinned
 // snapshots carry it so the pop-out window can show/copy the statement.
 let lastResultSql = "";
+let runningTab: ConnectionTab | undefined;
 // Pins currently popped out into their own window: hidden from the subtab
 // strip (the window holds the data) but kept here so they restore on close.
 const poppedOutPins = new Set<string>();
@@ -1457,6 +1499,17 @@ const inputHistories = new InputHistoryStore();
 
 function activeTab(): ConnectionTab | undefined {
     return tabs.find((t) => t.key === activeTabKey);
+}
+
+async function loadTabServerJob(tab: ConnectionTab, connectionId: string): Promise<void> {
+    try {
+        const identity = await App().GetConnectionIdentity(connectionId);
+        if (!tabs.includes(tab) || tab.connectionId !== connectionId) return;
+        tab.serverJob = formatServerJob(identity.serverJob);
+        if (activeTab() === tab) syncConnectionUi();
+    } catch {
+        // A connection may disappear while its window is opening.
+    }
 }
 
 // Connection-tab hover text. Connected tabs: the saved connection's Name first
@@ -1532,9 +1585,15 @@ function renderTabs(): void {
 
 // Detach: hand this tab's connection to a new window, close the tab here.
 async function detachTab(tab: ConnectionTab): Promise<void> {
-    if (!tab.connectionId) return;
+    if (!tab.connectionId || tab === runningTab) return;
     const app = App();
     try {
+        if (tab.pendingResults?.length && activeTab() !== tab) switchTab(tab.key);
+        if (activeTab() === tab) {
+            await app.UpdateEditorText(tab.connectionId, els.sqlInput.value);
+            await app.UpdateMessagesHTML(tab.connectionId, els.messageList.innerHTML);
+            await app.UpdateStatusText(tab.connectionId, els.statusText.textContent ?? "");
+        }
         await app.DetachConnection(tab.connectionId, t("main.detachedWindowTitle", "{label} — IBM i Run SQL").replace("{label}", tab.label));
     } catch (err) {
         showMessages([], t("main.detachFailed", "Detach failed: {message}").replace("{message}", String((err as Error)?.message ?? err)));
@@ -1570,6 +1629,7 @@ function snapshotActiveTab(): void {
         messagesHtml: els.messageList.innerHTML,
         messagesVisible: els.messageList.children.length > 0,
         showingResults: els.resultBody.children.length > 0 || els.resultHead.children.length > 0,
+        resultStatement: lastResultSql,
         pinnedResults: pinnedResults.map((p) => ({ ...p, columns: [...p.columns], rows: p.rows.map((r) => [...r]) })),
         activePinnedId,
         activePane,
@@ -1586,11 +1646,13 @@ function snapshotActiveTab(): void {
 }
 
 function restoreActiveTab(): void {
-    const snap = activeTab()?.snapshot;
+    const tab = activeTab();
+    const snap = tab?.snapshot;
     state.columns = snap ? [...snap.columns] : [];
     state.rows = snap ? snap.rows.map((r) => [...r]) : [];
     state.cursorId = snap?.cursorId ?? null;
     state.more = snap?.more ?? false;
+    lastResultSql = snap?.resultStatement ?? "";
     state.sortCol = -1;
     state.sortDir = 1;
     pinnedResults = (snap?.pinnedResults ?? []).map((p) => ({ ...p, columns: [...p.columns], rows: p.rows.map((r) => [...r]) }));
@@ -1598,7 +1660,7 @@ function restoreActiveTab(): void {
     els.sqlInput.value = snap?.editorText ?? "";
     // Restore the pane the tab was last showing (defaults to Results);
     // otherwise switching away from Spooled Files and back jumps to Results.
-    const pane = snap?.activePane ?? "results";
+    const pane = tab?.pendingMessagesReveal ? "messages" : snap?.activePane ?? "results";
     if (snap?.showingResults) {
         renderResultSubtabs();
         renderTable();
@@ -1623,7 +1685,12 @@ function restoreActiveTab(): void {
     if (pane === "spool" && spoolState.loadedFor !== (activeTab()?.connectionId ?? "")) {
         void refreshSpool(spool.filters());
     }
-    els.messageList.innerHTML = snap?.messagesHtml ?? "";
+    els.messageList.innerHTML = (snap?.messagesHtml ?? "") + (tab?.pendingMessagesHtml ?? "");
+    if (tab) { tab.pendingMessagesHtml = ""; tab.pendingMessagesReveal = false; }
+    if (tab?.pendingResults?.length) {
+        const pending = tab.pendingResults.splice(0);
+        for (const apply of pending) apply();
+    }
     closeAllPrompterPanes();
     // Quick Connect form: per-tab state; a fresh tab starts blank so the
     // suggest dropdown isn't pre-filtered by the previous tab's host.
@@ -1638,11 +1705,11 @@ function restoreActiveTab(): void {
     el<HTMLInputElement>("in-tls").checked = cf?.tls ?? (localStorage.getItem("ibmi-runsql-qc-tls") === "1");
     el<HTMLInputElement>("in-save-password").checked = cf?.savePassword ?? (localStorage.getItem("ibmi-runsql-qc-savepw") === "1");
     // A blank/fresh form means no saved profile is armed on this tab — disarm
-    // and hide GO (it only appears for a picked saved profile). dataset.armed
+    // GO. dataset.armed
     // lives on the shared button, so clear it or a prior tab's pick leaks over.
     if (!cf?.host) {
         const go = document.getElementById("btn-go") as HTMLButtonElement | null;
-        if (go) { delete go.dataset.armed; go.disabled = true; go.hidden = true; }
+        if (go) { delete go.dataset.armed; go.disabled = true; go.hidden = false; }
     }
     pushWorkspaceState();
 }
@@ -1698,16 +1765,19 @@ async function addDetachedTab(connectionId: string): Promise<void> {
     const app = App();
     const tab = addTab();
     tab.connectionId = connectionId;
+    void loadTabServerJob(tab, connectionId);
+    syncConnectionUi();
     let ws: {
         label?: string; editorText?: string; initialEditorText?: string; statusText?: string; messagesHtml?: string;
         columns?: ColumnInfo[]; rows?: unknown[][]; cursorId?: string; more?: boolean; showingResults?: boolean;
-        pinnedResults?: PinnedResult[];
+        pinnedResults?: PinnedResult[]; resultStatement?: string;
     } = {};
     try {
         ws = (await app.GetWorkspace(connectionId)) as typeof ws;
     } catch {
         // workspace gone: keep the bare tab
     }
+    if (!tabs.includes(tab) || tab.connectionId !== connectionId) return;
     tab.label = ws.label ?? t("main.connection", "Connection");
     tab.initialScriptReady = typeof ws.initialEditorText === "string";
     const showingResults = !!ws.showingResults && !!ws.columns;
@@ -1721,10 +1791,11 @@ async function addDetachedTab(connectionId: string): Promise<void> {
         messagesHtml: ws.messagesHtml ?? "",
         messagesVisible: !!ws.messagesHtml,
         showingResults,
+        resultStatement: ws.resultStatement ?? "",
         pinnedResults: (ws.pinnedResults ?? []).map((p) => ({ ...p })),
         activePinnedId: "",
     };
-    restoreActiveTab();
+    if (activeTab() === tab) restoreActiveTab();
     renderTabs();
     syncConnectionUi();
 }
@@ -1737,6 +1808,11 @@ const detachedConnId = new URLSearchParams(window.location.search).get("connecti
 
 // Only the main window hosts tabs; detached windows must ignore reattach events.
 if (!detachedConnId) {
+    Events.On("enhancedSupport:progress", (ev: { data?: { connectionId?: string; message?: string } }) => {
+        const connectionId = ev?.data?.connectionId;
+        const message = ev?.data?.message;
+        if (connectionId && message) appendConnectionLog(connectionId, message, "msg-info", false);
+    });
     Events.On("workspace:reattach", (ev: { data?: { connectionId?: string } }) => {
         const id = ev?.data?.connectionId;
         if (id) void addDetachedTab(id);
@@ -1763,6 +1839,7 @@ async function closeTab(key: string): Promise<void> {
     const idx = tabs.findIndex((t) => t.key === key);
     if (idx < 0) return;
     const tab = tabs[idx];
+    if (tab === runningTab) return;
     const app = App();
     if (app && tab.connectionId) {
         if (tab.key === activeTabKey) await persistEditorScript();
@@ -1788,6 +1865,9 @@ function syncConnectionUi(): void {
     const tab = activeTab();
     toolbarStatus.sync();
     const connected = !!tab?.connectionId;
+    const job = connected ? formatServerJob(tab?.serverJob) : "";
+    els.serverJob.hidden = !job;
+    els.serverJob.textContent = job ? `${t("main.sqlJob", "SQL job")}: ${job}` : "";
     els.badge.textContent = connected
         ? `${tab!.label} - ${t("main.connected", "Connected")}`
         : t("main.notConnected", "Not connected");
@@ -1798,16 +1878,16 @@ function syncConnectionUi(): void {
     const goBtn = document.getElementById("btn-go") as HTMLButtonElement | null;
     if (goBtn) {
         goBtn.disabled = connected || !goBtn.dataset.armed;
-        goBtn.hidden = connected || !goBtn.dataset.armed;
+        goBtn.hidden = connected;
     }
-    els.btnDisconnect.disabled = !connected;
-    els.btnRun.disabled = !connected;
-    els.btnRunAll.disabled = !connected;
-    els.btnRunFrom.disabled = !connected;
+    els.btnDisconnect.disabled = !connected || tab === runningTab;
+    els.btnRun.disabled = !connected || state.running;
+    els.btnRunAll.disabled = !connected || state.running;
+    els.btnRunFrom.disabled = !connected || state.running;
     els.btnPrompt.disabled = !connected;
     el<HTMLButtonElement>("btn-reload-script").disabled = !connected || !tab?.initialScriptReady;
-    els.btnPinResult.disabled = true; // needs a result set, not just a connection
-    els.btnCancel.disabled = true;
+    els.btnPinResult.disabled = !connected || state.running || !!activePinnedId || state.columns.length === 0 || state.rows.length === 0;
+    els.btnCancel.disabled = !state.running || tab !== runningTab;
     els.connectPanel.hidden = connected;
     // The bottom tab bar is ALWAYS visible/clickable. Connections/Settings
     // open even disconnected; Results/Messages/Spooled Files hide until
@@ -1840,6 +1920,7 @@ function setConnected(info: ConnectResponse): void {
     tab.initialScriptReady = false;
     tab.host = info.host;
     tab.user = info.user;
+    tab.serverJob = formatServerJob(info.serverJob);
     // Match the saved profile (for the tab name/tooltip) by host+user.
     tab.profileName = profiles.find((p) =>
         p.host.toLowerCase() === info.host.toLowerCase()
@@ -1855,13 +1936,13 @@ function setConnected(info: ConnectResponse): void {
     els.connectError.hidden = true;
     els.sqlInput.focus();
     // ACS-style connection log line.
-    const job = info.serverJob ? ` - ${info.serverJob}` : "";
-    appendLogLine(`[ ${nowStamp()} ]  ${info.user}@${info.host} ${t("main.connected", "Connected")}`, "msg-action");
+    const job = tab.serverJob ? ` - ${t("main.sqlJob", "SQL job")}: ${tab.serverJob}` : "";
+    appendLogLine(`[ ${nowStamp()} ]  ${info.user}@${info.host} ${t("main.connected", "Connected")}${job}`, "msg-action");
     appendLogLine(t("main.logConnectedDetail", "Connected to relational database {product} on {host} as {user}{job} using JDBC driver '{driver}'")
         .replace("{product}", info.databaseProduct)
         .replace("{host}", info.host)
         .replace("{user}", info.user)
-        .replace("{job}", job)
+        .replace("{job}", "")
         .replace("{driver}", `${info.driverName} ${info.driverVersion}`), "msg-info", true);
 }
 
@@ -1869,6 +1950,7 @@ function setDisconnected(): void {
     const tab = activeTab();
     if (tab) {
         tab.connectionId = null;
+        tab.serverJob = undefined;
         tab.cursorId = null;
         tab.hasCursor = false;
         tab.label = t("main.connectionN", "Connection {n}").replace("{n}", String(tabs.indexOf(tab) + 1));
@@ -1907,6 +1989,15 @@ function appendLogLine(text: string, cls = "msg-info", indent = false): HTMLLIEl
     return li;
 }
 
+function appendConnectionLog(connectionId: string, text: string, cls: string, reveal: boolean): void {
+    const tab = tabs.find((entry) => entry.connectionId === connectionId);
+    if (!tab) return;
+    const active = activeTab() === tab;
+    const html = appendEnhancedSupportLog(tab, active, els.messageList, text, cls, reveal);
+    if (active && reveal) showPane("messages");
+    if (html !== null) void App()?.UpdateMessagesHTML(connectionId, html);
+}
+
 function nowStamp(): string {
     return new Date().toLocaleString(undefined, {
         year: "numeric", month: "2-digit", day: "2-digit",
@@ -1915,7 +2006,7 @@ function nowStamp(): string {
 }
 
 /** ACS-style execution log entry: action header + statement + outcome. */
-function logExecution(action: string, statement: string, outcome: string): void {
+function logExecution(action: string, statement: string, outcome: string, isCL = false): void {
     if (els.messageList.children.length > 0) {
         const sep = document.createElement("li");
         sep.className = "msg msg-separator";
@@ -1924,12 +2015,12 @@ function logExecution(action: string, statement: string, outcome: string): void 
     }
     appendLogLine(`[ ${nowStamp()} ]  ${action}`, "msg-action");
     for (const line of statement.split("\n")) {
-        appendLogLine(line, "msg-statement", true);
+        appendLogLine(line, isCL ? "msg-statement msg-cl-command" : "msg-statement", true);
     }
     appendLogLine(outcome, outcome.startsWith(t("main.statementRan", "Statement ran")) || outcome.includes(t("main.ok", "OK")) ? "msg-info" : "msg-warning", true);
 }
 
-function showMessages(items: DisplayMessage[] | undefined, failure?: string): void {
+function showMessages(items: DisplayMessage[] | undefined, failure?: string, revealErrors = true): void {
     const hasContent = (items?.length ?? 0) > 0 || !!failure;
     if (!hasContent) return;
 
@@ -1952,15 +2043,16 @@ function showMessages(items: DisplayMessage[] | undefined, failure?: string): vo
                     : "")
                 : "";
         const textPart = m.text || m.message || "";
-        const sevPart = m.severity != null && m.typeName ? ` [${m.typeName} ${m.severity}]` : "";
+        const isCLMessage = !!m.id || !!m.typeName;
+        const clMetadata = [m.id, m.severity != null ? String(m.severity) : "", m.typeName].filter(Boolean).join(" ");
         if (!idPart) {
-            li.textContent = textPart + sevPart;
+            li.textContent = isCLMessage && clMetadata ? `${clMetadata} - ${textPart}` : textPart;
         } else if (m.id) {
-            li.textContent = `${idPart}: ${textPart}` + sevPart;
+            li.textContent = `${clMetadata} - ${textPart}`;
         } else {
             li.appendChild(document.createTextNode(idPart));
             li.appendChild(document.createElement("br"));
-            li.appendChild(document.createTextNode(textPart + sevPart));
+            li.appendChild(document.createTextNode(textPart));
         }
         li.classList.add("msg-indent");
         // The Go-side error string repeats the SQL message in [sqlState] [msgId]
@@ -1970,7 +2062,8 @@ function showMessages(items: DisplayMessage[] | undefined, failure?: string): vo
         if (m.typeName) tip.push(t("main.msgTypeSeverity", "Type: {type}  Severity: {severity}").replace("{type}", m.typeName).replace("{severity}", String(m.severity)));
         if (m.secondLevelText) tip.push(m.secondLevelText);
         if (tip.length) li.title = tip.join("\n\n");
-        if (m.secondLevelText) {
+        if (isCLMessage) addCLMessageDetails(li, m);
+        else if (m.secondLevelText) {
             const sub = document.createElement("div");
             sub.className = "msg-second-level";
             sub.textContent = m.secondLevelText;
@@ -1987,7 +2080,7 @@ function showMessages(items: DisplayMessage[] | undefined, failure?: string): vo
     }
     // Auto-switch to Messages only when something failed; info messages stay
     // out of the way on the Results pane.
-    if (hasError) showPane("messages");
+    if (hasError && revealErrors) showPane("messages");
 }
 
 function columnLabel(c: ColumnInfo): string {
@@ -2078,6 +2171,7 @@ function renderTable(): void {
             } else {
                 td.textContent = text;
             }
+            if (columnKind(c) === "text") td.classList.add("preserve-whitespace");
             if (shouldRightAlign(c)) td.classList.add("num");
             tr.appendChild(td);
         });
@@ -2444,16 +2538,31 @@ function showSqlResult(result: SqlResult): void {
 }
 
 function showCLResult(result: CLResult): void {
+    if (result.preserveResults) {
+        showMessages(result.messages, result.ok ? undefined : t("main.clCommandFailed", "CL command failed."), false);
+        return;
+    }
+    if (result.resultSet) {
+        const table = result.resultSet;
+        state.rows = table.rows ?? [];
+        lastResultSql = result.command;
+        showSqlResult({ ...table, kind: "rows", elapsedMs: result.elapsedMs });
+        showMessages(result.messages, result.ok ? undefined : t("main.clCommandFailed", "CL command failed."), false);
+        return;
+    }
     state.columns = [];
     state.rows = [];
     state.cursorId = null;
     state.more = false;
+    lastResultSql = "";
     els.resultHead.innerHTML = "";
     els.resultBody.innerHTML = "";
     showMessages(result.messages, result.ok ? undefined : t("main.clCommandFailed", "CL command failed."));
     els.statusText.textContent = `CL: ${result.command} — ${result.ok ? t("main.ok", "OK") : t("main.failed", "failed")}${t("main.elapsedIn", " in {ms} ms").replace("{ms}", String(result.elapsedMs))}`;
     els.btnLoadMore.hidden = true;
     els.btnLoadAll.hidden = true;
+    els.saveResultsWrap.hidden = true;
+    els.btnPinResult.disabled = true;
 }
 
 async function doConnect(): Promise<void> {
@@ -2474,9 +2583,7 @@ async function doConnect(): Promise<void> {
         // the quick-connect form — resolve it from the host/user match.
         const hostVal = el<HTMLInputElement>("in-host").value;
         const userVal = el<HTMLInputElement>("in-user").value;
-        const matchProf = profiles.find((p) =>
-            p.host.toLowerCase() === hostVal.trim().toLowerCase()
-            && p.user.toLowerCase() === userVal.trim().toLowerCase());
+        const matchProf = matchConnectionProfile(profiles, hostVal, userVal, activeTab()?.selectedProfileName);
         const info = await app.Connect({
             host: hostVal,
             user: userVal,
@@ -2486,13 +2593,14 @@ async function doConnect(): Promise<void> {
             defaultSchema: el<HTMLInputElement>("in-schema").value,
             fetchSize: state.fetchSize,
             bidiStringType: matchProf?.bidiStringType ?? "",
+            clExecutionMode: matchProf?.clExecutionMode || (matchProf?.useEnhancedCLSupport === true ? "enhanced" : "standard"),
         });
         setConnected(info);
+        const tab = activeTab();
+        if (tab && matchProf) { tab.profileName = matchProf.name; tab.label = tabLabelText(tab); renderTabs(); }
         // Auto-save (MRU) on successful connect — no Save button needed.
-        await saveProfile();
-        const prof = matchProf && profiles.find((p) =>
-            p.host.toLowerCase() === info.host.toLowerCase()
-            && p.user.toLowerCase() === info.user.toLowerCase());
+        await saveProfile(matchProf);
+        const prof = matchProf && profiles.find((p) => p.name === matchProf.name) || matchProf;
         els.sqlInput.value = scriptForConnection(prof, els.sqlInput.value);
         await app.SetInitialEditorText(info.connectionId, els.sqlInput.value);
         const connectedTab = tabs.find((tab) => tab.connectionId === info.connectionId);
@@ -2506,6 +2614,64 @@ async function doConnect(): Promise<void> {
             void refreshSpool(spool.filters());
         }
         toolbarStatus.show(t("main.connectedTo", "Connected to {target}").replace("{target}", `${info.user}@${info.host}`), info.connectionId);
+        let automaticOperation: string | undefined;
+        let additionalInstallationsLogged = false;
+        const appendAdditionalInstallations = (lines: string[], cls: string, reveal: boolean) => {
+            lines.forEach((line, index) => appendConnectionLog(info.connectionId, line, cls, reveal && index === 0));
+        };
+        try {
+            const settings = await app.GetAppSettings();
+            const outcome = await setupEnhancedSupport(settings, info.host,
+                (library) => app.CheckEnhancedSupport(info.connectionId, library),
+                (library) => {
+                    if (!automaticOperation) appendConnectionLog(info.connectionId, `Installing enhanced support in ${library} on ${info.host}...`, "msg-action", true);
+                    return app.InstallEnhancedSupport(info.connectionId, library);
+                },
+                confirmEnhancedSupport, matchProf?.clExecutionMode === "enhanced" || matchProf?.useEnhancedCLSupport === true,
+                (library, expectedVersion) => {
+                    if (!automaticOperation) appendConnectionLog(info.connectionId, `Upgrading ${library}.CMD_RUN on ${info.host} from version ${expectedVersion}...`, "msg-action", true);
+                    return app.UpgradeEnhancedSupport(info.connectionId, library, expectedVersion);
+                },
+                (status) => {
+                    if (status.versionStatus === "older") {
+                        appendConnectionLog(info.connectionId, `Detected ${status.library}.CMD_RUN version ${status.installedVersion || "unknown"}. Upgrade required before CL processing.`, "msg-warning", false);
+                        const alternative = enhancedSupportAlternativeMessage(status);
+                        if (alternative) {
+                            appendAdditionalInstallations(alternative, "msg-info", false);
+                            additionalInstallationsLogged = true;
+                        }
+                    }
+                },
+                (library) => {
+                    if (!automaticOperation) appendConnectionLog(info.connectionId, `Repairing ${library}/CMD_RUN on ${info.host}...`, "msg-action", true);
+                    return app.RepairEnhancedSupport(info.connectionId, library);
+                },
+                (library) => app.SelectEnhancedSupport(info.connectionId, library),
+                (library) => {
+                    appSettingsCache = { ...appSettingsCache, enhancedSupportLibrary: library };
+                    settingsPane?.updateSetting("enhancedSupportLibrary", library);
+                },
+                (operation, library, alternatives) => {
+                    automaticOperation = operation;
+                    appendConnectionLog(info.connectionId, `Starting automatic ${operation} of ${library}.CMD_RUN on ${info.host} (Function update notifications).`, "msg-action", true);
+                    if (!additionalInstallationsLogged && alternatives.length) {
+                        const lines = enhancedSupportInstallationMessages(alternatives, undefined, `not selected; ${library} is configured`);
+                        appendAdditionalInstallations(lines, "msg-warning", true);
+                        additionalInstallationsLogged = true;
+                    }
+                });
+            const message = enhancedSupportLogEntry(outcome, info.host);
+            if (message) appendConnectionLog(info.connectionId, message.text, message.cls, message.reveal);
+            if (!additionalInstallationsLogged && "status" in outcome) {
+                const alternative = enhancedSupportAlternativeMessage(outcome.status);
+                if (alternative) {
+                    appendAdditionalInstallations(alternative, "msg-info", false);
+                    additionalInstallationsLogged = true;
+                }
+            }
+        } catch (error) {
+            appendConnectionLog(info.connectionId, `${automaticOperation ? `Automatic ${automaticOperation} failed` : "Enhanced support"}: ${String((error as Error)?.message ?? error)}`, "msg-error", true);
+        }
     } catch (err) {
         els.btnConnect.disabled = false;
         // Failed connect: re-arm GO so it can be pressed again immediately.
@@ -2545,6 +2711,8 @@ function formProfile(): ConnectionProfile {
 }
 
 function fillFormFromProfile(p: ConnectionProfile, password?: string): void {
+    const tab = activeTab();
+    if (tab) tab.selectedProfileName = p.name;
     el<HTMLInputElement>("in-host").value = p.host;
     el<HTMLInputElement>("in-user").value = p.user;
     el<HTMLInputElement>("in-schema").value = p.defaultSchema ?? "";
@@ -2567,6 +2735,8 @@ function fillFormFromProfile(p: ConnectionProfile, password?: string): void {
 // reset the switches to the user's sticky localStorage state. GO hides (nothing
 // armed); Connect handles the new connection.
 function clearConnectForm(): void {
+    const tab = activeTab();
+    if (tab) tab.selectedProfileName = undefined;
     el<HTMLInputElement>("in-host").value = "";
     el<HTMLInputElement>("in-user").value = "";
     el<HTMLInputElement>("in-password").value = "";
@@ -2575,7 +2745,7 @@ function clearConnectForm(): void {
     el<HTMLInputElement>("in-tls").checked = localStorage.getItem("ibmi-runsql-qc-tls") === "1";
     el<HTMLInputElement>("in-save-password").checked = localStorage.getItem("ibmi-runsql-qc-savepw") === "1";
     const go = document.getElementById("btn-go") as HTMLButtonElement | null;
-    if (go) { delete go.dataset.armed; go.disabled = true; go.hidden = true; }
+    if (go) { delete go.dataset.armed; go.disabled = true; go.hidden = false; }
     el<HTMLInputElement>("in-host").focus();
 }
 
@@ -2606,10 +2776,16 @@ async function loadProfiles(): Promise<void> {
     }
 }
 
-async function saveProfile(): Promise<void> {
+async function saveProfile(selectedProfile?: ConnectionProfile): Promise<void> {
     const app = App();
     if (!app) return;
     const p = formProfile();
+    if (selectedProfile) {
+        p.name = selectedProfile.name;
+        p.clExecutionMode = selectedProfile.clExecutionMode || (selectedProfile.useEnhancedCLSupport === true ? "enhanced" : "standard");
+    } else {
+        p.clExecutionMode = "standard";
+    }
     if (!p.host) {
         els.connectError.textContent = t("main.enterHost", "Enter a host before saving.");
         els.connectError.hidden = false;
@@ -2627,7 +2803,7 @@ async function saveProfile(): Promise<void> {
 async function doDisconnect(): Promise<void> {
     const app = App();
     const tab = activeTab();
-    if (!app || !tab?.connectionId) return;
+    if (!app || !tab?.connectionId || tab === runningTab) return;
     if (connectionsPane && !await connectionsPane.commit()) return;
     await loadProfiles();
     await persistEditorScript();
@@ -2661,91 +2837,103 @@ async function doDisconnect(): Promise<void> {
 
 // Execute one statement text on the active tab; shared by all run modes.
 // actionLabel is the ACS-style verb for the log ("Run Selected...", etc.).
-async function runOne(text: string, actionLabel = t("main.logRunSelected", "Run Selected...")): Promise<void> {
+async function runOne(text: string, actionLabel = t("main.logRunSelected", "Run Selected..."), tab = activeTab()): Promise<boolean> {
     const app = App();
-    const connectionId = activeTab()?.connectionId;
-    if (!app || !connectionId) return;
-    inputHistories.for(activeTab()?.connectionId).push(text);
-    await persistEditorScript(); // keep the per-connection script current on every run
+    const connectionId = tab?.connectionId;
+    if (!app || !connectionId || !tab) return false;
+    tab.resultVersion = (tab.resultVersion ?? 0) + 1;
+    inputHistories.for(connectionId).push(text);
+    if (activeTab() === tab) await persistEditorScript();
     // Persisted per-connection history (powers the picker; survives restarts).
     // Store the terminating semicolon so recall/picker round-trip the exact
     // runnable statement.
     const logged = /;\s*$/.test(text) ? text : `${text};`;
-    void app.AddStatementHistory(activeTab()!.connectionId!, logged).catch(() => { /* best effort */ });
-    state.sortCol = -1;
-    state.sortDir = 1;
-    state.columns = [];
-    state.rows = [];
-    state.cursorId = null;
-    state.more = false;
-    els.resultHead.innerHTML = "";
-    els.resultBody.innerHTML = "";
-    els.btnLoadMore.hidden = true;
-    els.btnLoadAll.hidden = true;
-    // A new run targets the live "Results" subtab: switch the strip now so the
-    // grid the user watches fill up is the live one, not a pinned snapshot that
-    // still shows as the active subtab.
-    if (activePinnedId !== "") {
-        activePinnedId = "";
-        renderResultSubtabs();
+    void app.AddStatementHistory(connectionId, logged).catch(() => { /* best effort */ });
+    if (activeTab() === tab) {
+        if (/^\s*CL\s*:/i.test(text)) {
+            showPane("messages");
+        } else {
+            state.sortCol = -1;
+            state.sortDir = 1;
+            state.columns = [];
+            state.rows = [];
+            state.cursorId = null;
+            state.more = false;
+            els.resultHead.innerHTML = "";
+            els.resultBody.innerHTML = "";
+            els.btnLoadMore.hidden = true;
+            els.btnLoadAll.hidden = true;
+            if (activePinnedId !== "") {
+                activePinnedId = "";
+                renderResultSubtabs();
+            }
+            showPane("results");
+        }
     }
-    // CL commands have no result set — their output is the Messages pane
-    // (action log + CPF/CPC messages). SQL stays on Results.
-    showPane(/^\s*CL\s*:/i.test(text) ? "messages" : "results");
     const started = performance.now();
     try {
         const result = await app.Run({
-            connectionId: activeTab()?.connectionId ?? "",
+            connectionId,
             text,
             fetchSize: state.fetchSize,
         });
         const elapsed = Math.round(performance.now() - started);
-        if ((result as CLResult).kind === "cl") {
-            const cl = result as CLResult;
-            logExecution(actionLabel, text,
-                cl.ok ? t("main.logCommandRan", "Command ran successfully   ({ms} ms)").replace("{ms}", String(cl.elapsedMs))
-                    : t("main.logCommandFailed", "Command failed   ({ms} ms)").replace("{ms}", String(cl.elapsedMs)));
-            showCLResult(cl);
-        } else {
-            const sqlResult = result as SqlResult;
-            if (sqlResult.kind === "error") {
-                const stateText = sqlResult.messages?.[0]?.sqlState ? `  ${t("main.sqlStateTag", "SQLState {state}").replace("{state}", sqlResult.messages[0].sqlState!)}` : "";
-                logExecution(actionLabel, text, t("main.logStatementFailed", "Statement failed{state}   ({ms} ms)").replace("{state}", stateText).replace("{ms}", String(sqlResult.elapsedMs ?? elapsed)));
-            } else if (sqlResult.kind === "count") {
-                logExecution(actionLabel, text, t("main.logStatementRanCount", "Statement ran successfully   ({ms} ms) — {count} row(s) affected").replace("{ms}", String(sqlResult.elapsedMs ?? elapsed)).replace("{count}", String(sqlResult.updateCount)));
+        const apply = () => {
+            if ((result as CLResult).kind === "cl") {
+                const cl = result as CLResult;
+                logExecution(actionLabel, text,
+                    cl.ok ? t("main.logCommandRan", "Command ran successfully   ({ms} ms)").replace("{ms}", String(cl.elapsedMs))
+                        : t("main.logCommandFailed", "Command failed   ({ms} ms)").replace("{ms}", String(cl.elapsedMs)), true);
+                showCLResult(cl);
             } else {
-                logExecution(actionLabel, text, t("main.logStatementRan", "Statement ran successfully   ({ms} ms)").replace("{ms}", String(sqlResult.elapsedMs ?? elapsed)));
+                const sqlResult = result as SqlResult;
+                if (sqlResult.kind === "error") {
+                    const stateText = sqlResult.messages?.[0]?.sqlState ? `  ${t("main.sqlStateTag", "SQLState {state}").replace("{state}", sqlResult.messages[0].sqlState!)}` : "";
+                    logExecution(actionLabel, text, t("main.logStatementFailed", "Statement failed{state}   ({ms} ms)").replace("{state}", stateText).replace("{ms}", String(sqlResult.elapsedMs ?? elapsed)));
+                } else if (sqlResult.kind === "count") {
+                    logExecution(actionLabel, text, t("main.logStatementRanCount", "Statement ran successfully   ({ms} ms) — {count} row(s) affected").replace("{ms}", String(sqlResult.elapsedMs ?? elapsed)).replace("{count}", String(sqlResult.updateCount)));
+                } else {
+                    logExecution(actionLabel, text, t("main.logStatementRan", "Statement ran successfully   ({ms} ms)").replace("{ms}", String(sqlResult.elapsedMs ?? elapsed)));
+                }
+                state.rows = sqlResult.kind === "rows" ? sqlResult.rows ?? [] : [];
+                lastResultSql = sqlResult.kind === "rows" ? text : "";
+                showSqlResult(sqlResult);
             }
-            // Set rows BEFORE showSqlResult so its renderTable() paints the new
-            // columns+rows together (previously rows landed after the render,
-            // producing a one-frame "cleared" flash when a pinned tab had focus).
-            state.rows = sqlResult.kind === "rows" ? sqlResult.rows ?? [] : [];
-            // Record the statement that produced this result for pinning.
-            lastResultSql = sqlResult.kind === "rows" ? text : "";
-            showSqlResult(sqlResult);
-        }
-        const status = (result as SqlResult).kind === "error"
-            ? t("main.statementFailed", "Statement failed")
-            : els.statusText.textContent ?? "";
-        toolbarStatus.show(status, connectionId);
+            const status = (result as SqlResult).kind === "error"
+                ? t("main.statementFailed", "Statement failed")
+                : els.statusText.textContent ?? "";
+            toolbarStatus.show(status, connectionId);
+            pushWorkspaceState();
+        };
+        if (activeTab() === tab) apply();
+        else (tab.pendingResults ??= []).push(apply);
+        return (result as CLResult).kind === "cl" ? (result as CLResult).ok : (result as SqlResult).kind !== "error";
     } catch (err) {
         const elapsed = Math.round(performance.now() - started);
-        logExecution(actionLabel, text, t("main.logStatementFailed", "Statement failed{state}   ({ms} ms)").replace("{state}", "").replace("{ms}", String(elapsed)));
-        showMessages([], String((err as Error)?.message ?? err));
-        els.statusText.textContent = t("main.error", "Error");
-        toolbarStatus.show(t("main.statementFailed", "Statement failed"), connectionId);
+        const apply = () => {
+            logExecution(actionLabel, text, t("main.logStatementFailed", "Statement failed{state}   ({ms} ms)").replace("{state}", "").replace("{ms}", String(elapsed)), /^\s*CL(?:\s*:|\s+)/i.test(text));
+            showMessages([], String((err as Error)?.message ?? err));
+            els.statusText.textContent = t("main.error", "Error");
+            toolbarStatus.show(t("main.statementFailed", "Statement failed"), connectionId);
+            pushWorkspaceState();
+        };
+        if (activeTab() === tab) apply();
+        else (tab.pendingResults ??= []).push(apply);
         throw err;
     }
 }
 
 function setRunning(on: boolean): void {
     state.running = on;
-    els.btnRun.disabled = on;
-    els.btnRunAll.disabled = on;
-    els.btnRunFrom.disabled = on;
+    runningTab = on ? activeTab() : undefined;
+    const connected = !!activeTab()?.connectionId;
+    els.btnRun.disabled = on || !connected;
+    els.btnRunAll.disabled = on || !connected;
+    els.btnRunFrom.disabled = on || !connected;
+    els.btnDisconnect.disabled = !connected || (on && activeTab() === runningTab);
     // Pinning a result mid-run would snapshot the cleared/refreshing grid.
-    if (on) els.btnPinResult.disabled = true;
-    els.btnCancel.disabled = !on;
+    els.btnPinResult.disabled = on || !connected || !!activePinnedId || state.columns.length === 0 || state.rows.length === 0;
+    els.btnCancel.disabled = !on || activeTab() !== runningTab;
 }
 
 // Live busy indicator: status-busy styling + an elapsed-time ticker on the
@@ -2862,6 +3050,7 @@ async function doRunAll(): Promise<void> {
     if (!activeTab()?.connectionId || state.running) return;
     const source = els.sqlInput.value;
     const connectionId = activeTab()?.connectionId;
+    const tab = activeTab();
     const stmts = splitStatements(source);
     if (!stmts.length) return;
     setRunning(true);
@@ -2880,13 +3069,14 @@ async function doRunAll(): Promise<void> {
                 els.sqlInput.highlightRunningStatement(stmts[i].start, stmts[i].end + (source[stmts[i].end] === ";" ? 1 : 0));
             }
             try {
-                await runOne(stmts[i].text, t("main.logRunAllStatement", "Run All — statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length)));
+                const succeeded = await runOne(stmts[i].text, t("main.logRunAllStatement", "Run All — statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length)), tab);
+                if (!succeeded) return;
                 moveBatchCaret(source, connectionId, stmts[i + 1]?.start ?? (stmts[i].end + (source[stmts[i].end] === ";" ? 1 : 0)));
             } finally {
                 els.sqlInput.clearRunningStatement();
             }
         }
-        els.statusText.textContent = t("main.statementsCompleted", "{count} statements completed.").replace("{count}", String(stmts.length));
+        if (activeTab() === tab) els.statusText.textContent = t("main.statementsCompleted", "{count} statements completed.").replace("{count}", String(stmts.length));
     } catch {
         // runOne already surfaced the error; stop the batch.
     } finally {
@@ -2902,6 +3092,7 @@ async function doRunFromSelected(): Promise<void> {
     if (!activeTab()?.connectionId || state.running) return;
     const src = els.sqlInput.value;
     const connectionId = activeTab()?.connectionId;
+    const tab = activeTab();
     const pos = els.sqlInput.selectionStart ?? 0;
     const stmts = statementsFrom(src, pos);
     if (!stmts.length) return;
@@ -2921,13 +3112,14 @@ async function doRunFromSelected(): Promise<void> {
                 els.sqlInput.highlightRunningStatement(stmts[i].start, stmts[i].end + (src[stmts[i].end] === ";" ? 1 : 0));
             }
             try {
-                await runOne(stmts[i].text, t("main.logRunFromStatement", "Run from Selected — statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length)));
+                const succeeded = await runOne(stmts[i].text, t("main.logRunFromStatement", "Run from Selected — statement {current} of {total}...").replace("{current}", String(i + 1)).replace("{total}", String(stmts.length)), tab);
+                if (!succeeded) return;
                 moveBatchCaret(src, connectionId, stmts[i + 1]?.start ?? (stmts[i].end + (src[stmts[i].end] === ";" ? 1 : 0)));
             } finally {
                 els.sqlInput.clearRunningStatement();
             }
         }
-        els.statusText.textContent = t("main.statementsCompleted", "{count} statements completed.").replace("{count}", String(stmts.length));
+        if (activeTab() === tab) els.statusText.textContent = t("main.statementsCompleted", "{count} statements completed.").replace("{count}", String(stmts.length));
     } catch {
         // stop batch on failure
     } finally {
@@ -2940,16 +3132,29 @@ async function doRunFromSelected(): Promise<void> {
 
 async function doFetch(all: boolean): Promise<void> {
     const app = App();
-    if (!app || !activeTab()?.connectionId || !state.more) return;
+    const tab = activeTab();
+    const connectionId = tab?.connectionId;
+    const cursorId = state.cursorId;
+    const version = tab?.resultVersion ?? 0;
+    if (!app || !tab || !connectionId || !cursorId || !state.more) return;
     els.btnLoadMore.disabled = true;
     els.btnLoadAll.disabled = true;
     try {
         do {
             const page = await app.Fetch({
-                connectionId: activeTab()?.connectionId ?? "",
-                cursorId: state.cursorId ?? "",
+                connectionId,
+                cursorId,
                 fetchSize: state.fetchSize,
             });
+            if ((tab.resultVersion ?? 0) !== version || tab.connectionId !== connectionId) return;
+            if (activeTab() !== tab) {
+                if (tab.snapshot && page.kind === "rows") {
+                    tab.snapshot.rows.push(...(page.rows ?? []));
+                    tab.snapshot.cursorId = page.cursorId ?? tab.snapshot.cursorId;
+                    tab.snapshot.more = !!page.more;
+                }
+                return;
+            }
             if (page.kind === "error") {
                 showMessages(page.messages, page.error);
                 state.more = false;
@@ -2962,7 +3167,7 @@ async function doFetch(all: boolean): Promise<void> {
         renderTable();
         updateStatus("rows", undefined, state.rows.length);
     } catch (err) {
-        showMessages([], String((err as Error)?.message ?? err));
+        if (activeTab() === tab && (tab.resultVersion ?? 0) === version) showMessages([], String((err as Error)?.message ?? err));
     } finally {
         els.btnLoadMore.disabled = false;
         els.btnLoadAll.disabled = false;
@@ -3337,7 +3542,16 @@ function handleHistoryKeydown(ev: KeyboardEvent): void {
     pushWorkspaceState();
 }
 
+els.sqlInput.setCompletionSource(createSQLCompletionSource(() => {
+    const tab = activeTab();
+    if (!tab?.connectionId) return null;
+    const profile = profiles.find((entry) => entry.name === tab.profileName);
+    const schema = profile?.defaultSchema || el<HTMLInputElement>("in-schema").value.trim() || tab.user || "";
+    return { connectionId: tab.connectionId, defaultSchema: schema.startsWith('"') ? schema.slice(1, -1).replace(/""/g, '"') : schema.toUpperCase() };
+}, (connectionId, kind, schema, object, prefix) => App().GetSQLCompletions(connectionId, kind, schema, object, prefix)));
+
 els.sqlInput.addEventListener("keydown", (ev: KeyboardEvent) => {
+    if (els.sqlInput.consumeCompletionKey(ev)) return;
     if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") {
         ev.preventDefault();
         void doRun();
@@ -3363,7 +3577,7 @@ el<HTMLInputElement>("in-password").addEventListener("keydown", (ev: KeyboardEve
     if (ev.key === "Enter") void doConnect();
 });
 
-// Disable AND hide the quick-connect GO button once the user edits the form
+// Disable the quick-connect GO button once the user edits the form
 // manually (GO is only for a picked saved profile; new connections use Connect).
 ["in-host", "in-user", "in-password"].forEach((id) => {
     document.getElementById(id)?.addEventListener("input", () => {
@@ -3371,7 +3585,7 @@ el<HTMLInputElement>("in-password").addEventListener("keydown", (ev: KeyboardEve
         if (go) {
             delete go.dataset.armed;
             go.disabled = true;
-            go.hidden = true;
+            go.hidden = false;
         }
     });
 });
@@ -3625,6 +3839,7 @@ if (detachedConnId) {
     };
     tabs.push(tab);
     activeTabKey = tab.key;
+    void loadTabServerJob(tab, detachedConnId);
     // Set all buttons consistently from the tab's connected state (Connect
     // disabled, Disconnect enabled, Run/Prompt enabled).
     syncConnectionUi();
@@ -3639,13 +3854,14 @@ if (detachedConnId) {
     interface WorkspaceMirror {
         label?: string; editorText?: string; initialEditorText?: string; statusText?: string; messagesHtml?: string;
         columns?: ColumnInfo[]; rows?: unknown[][]; cursorId?: string; more?: boolean; showingResults?: boolean;
-        pinnedResults?: PinnedResult[];
+        pinnedResults?: PinnedResult[]; resultStatement?: string;
     }
 
     // Apply a workspace snapshot pushed from the Go store. Editor text is only
     // overwritten when it differs, so our own keystrokes (echoed back via
     // UpdateEditorText) never reset the caret.
     const applyWorkspace = (ws: WorkspaceMirror): void => {
+        if (tab.connectionId !== detachedConnId) return;
         if (typeof ws.initialEditorText === "string" && !tab.initialScriptReady) {
             tab.initialScriptReady = true;
             syncConnectionUi();
@@ -3668,6 +3884,7 @@ if (detachedConnId) {
             renderResultSubtabs();
         }
         if (ws.showingResults && ws.columns) {
+            lastResultSql = ws.resultStatement ?? "";
             state.columns = [...ws.columns];
             state.rows = (ws.rows ?? []).map((r) => [...r]);
             state.cursorId = ws.cursorId ?? null;
@@ -3679,6 +3896,20 @@ if (detachedConnId) {
             els.saveResultsWrap.hidden = displayedData().rows.length === 0;
             els.btnPinResult.disabled = pinnedView || displayedData().rows.length === 0;
             showPane("results");
+        } else if (ws.showingResults === false) {
+            state.columns = [];
+            state.rows = [];
+            state.cursorId = null;
+            state.more = false;
+            activePinnedId = "";
+            renderResultSubtabs();
+            lastResultSql = "";
+            els.resultHead.innerHTML = "";
+            els.resultBody.innerHTML = "";
+            els.btnLoadMore.hidden = true;
+            els.btnLoadAll.hidden = true;
+            els.saveResultsWrap.hidden = true;
+            els.btnPinResult.disabled = true;
         }
     };
 

@@ -12,6 +12,41 @@ export class AppSettings {
      * @param {Partial<AppSettings>} [$$source = {}] - The source object to create the AppSettings.
      */
     constructor($$source = {}) {
+        if (!("installEnhancedSupport" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["installEnhancedSupport"] = false;
+        }
+        if (!("showCLMessagesInResults" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["showCLMessagesInResults"] = false;
+        }
+        if (!("enhancedSupportLibrary" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["enhancedSupportLibrary"] = "";
+        }
+        if (!("functionUpdateNotifications" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["functionUpdateNotifications"] = "";
+        }
+        if (!("clExecutionMode" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["clExecutionMode"] = "";
+        }
         if (/** @type {any} */(false)) {
             /**
              * @member
@@ -341,6 +376,20 @@ export class ConnectRequest {
              */
             this["bidiStringType"] = undefined;
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["clExecutionMode"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | null | undefined}
+             */
+            this["useEnhancedCLSupport"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -457,6 +506,13 @@ export class ConnectionIdentity {
              */
             this["user"] = "";
         }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["serverJob"] = undefined;
+        }
 
         Object.assign(this, $$source);
     }
@@ -554,6 +610,20 @@ export class ConnectionProfile {
              * @member
              * @type {string | undefined}
              */
+            this["clExecutionMode"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | null | undefined}
+             */
+            this["useEnhancedCLSupport"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
             this["script"] = undefined;
         }
         if (/** @type {any} */(false)) {
@@ -613,6 +683,158 @@ export class ConnectionProfile {
     static createFrom($$source = {}) {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new ConnectionProfile(/** @type {Partial<ConnectionProfile>} */($$parsedSource));
+    }
+}
+
+export class EnhancedSupportStatus {
+    /**
+     * Creates a new EnhancedSupportStatus instance.
+     * @param {Partial<EnhancedSupportStatus>} [$$source = {}] - The source object to create the EnhancedSupportStatus.
+     */
+    constructor($$source = {}) {
+        if (!("library" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["library"] = "";
+        }
+        if (!("programExists" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["programExists"] = false;
+        }
+        if (!("routineExists" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["routineExists"] = false;
+        }
+        if (!("routineMatches" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["routineMatches"] = false;
+        }
+        if (!("installed" in $$source)) {
+            /**
+             * @member
+             * @type {boolean}
+             */
+            this["installed"] = false;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["version"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["previousVersion"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["cppMember"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["sqlMember"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["module"] = undefined;
+        }
+        if (!("installedVersion" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["installedVersion"] = "";
+        }
+        if (!("bundledVersion" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["bundledVersion"] = "";
+        }
+        if (!("versionStatus" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["versionStatus"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {boolean | null | undefined}
+             */
+            this["cppCompilerAvailable"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {EnhancedSupportStatus | null | undefined}
+             */
+            this["configuredTarget"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {EnhancedSupportStatus | null | undefined}
+             */
+            this["newerAvailable"] = undefined;
+        }
+        if (!("installations" in $$source)) {
+            /**
+             * @member
+             * @type {EnhancedSupportStatus[]}
+             */
+            this["installations"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new EnhancedSupportStatus instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {EnhancedSupportStatus}
+     */
+    static createFrom($$source = {}) {
+        const $$createField14_0 = $$createType1;
+        const $$createField15_0 = $$createType1;
+        const $$createField16_0 = $$createType2;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("configuredTarget" in $$parsedSource) {
+            $$parsedSource["configuredTarget"] = $$createField14_0($$parsedSource["configuredTarget"]);
+        }
+        if ("newerAvailable" in $$parsedSource) {
+            $$parsedSource["newerAvailable"] = $$createField15_0($$parsedSource["newerAvailable"]);
+        }
+        if ("installations" in $$parsedSource) {
+            $$parsedSource["installations"] = $$createField16_0($$parsedSource["installations"]);
+        }
+        return new EnhancedSupportStatus(/** @type {Partial<EnhancedSupportStatus>} */($$parsedSource));
     }
 }
 
@@ -856,7 +1078,7 @@ export class OutputQueueListResult {
      * @returns {OutputQueueListResult}
      */
     static createFrom($$source = {}) {
-        const $$createField0_0 = $$createType1;
+        const $$createField0_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("queues" in $$parsedSource) {
             $$parsedSource["queues"] = $$createField0_0($$parsedSource["queues"]);
@@ -921,8 +1143,8 @@ export class PinnedResult {
      * @returns {PinnedResult}
      */
     static createFrom($$source = {}) {
-        const $$createField2_0 = $$createType3;
-        const $$createField3_0 = $$createType5;
+        const $$createField2_0 = $$createType6;
+        const $$createField3_0 = $$createType8;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
             $$parsedSource["columns"] = $$createField2_0($$parsedSource["columns"]);
@@ -973,6 +1195,55 @@ export class RunRequest {
     static createFrom($$source = {}) {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new RunRequest(/** @type {Partial<RunRequest>} */($$parsedSource));
+    }
+}
+
+export class SQLCompletion {
+    /**
+     * Creates a new SQLCompletion instance.
+     * @param {Partial<SQLCompletion>} [$$source = {}] - The source object to create the SQLCompletion.
+     */
+    constructor($$source = {}) {
+        if (!("name" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["name"] = "";
+        }
+        if (!("kind" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["kind"] = "";
+        }
+        if (!("detail" in $$source)) {
+            /**
+             * @member
+             * @type {string}
+             */
+            this["detail"] = "";
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
+             * @type {string | undefined}
+             */
+            this["specificName"] = undefined;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SQLCompletion instance from a string or object.
+     * @param {any} [$$source = {}]
+     * @returns {SQLCompletion}
+     */
+    static createFrom($$source = {}) {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SQLCompletion(/** @type {Partial<SQLCompletion>} */($$parsedSource));
     }
 }
 
@@ -1261,7 +1532,7 @@ export class SpooledFileDataResult {
      * @returns {SpooledFileDataResult}
      */
     static createFrom($$source = {}) {
-        const $$createField5_0 = $$createType6;
+        const $$createField5_0 = $$createType9;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("pages" in $$parsedSource) {
             $$parsedSource["pages"] = $$createField5_0($$parsedSource["pages"]);
@@ -1672,7 +1943,7 @@ export class SpooledFileResult {
      * @returns {SpooledFileResult}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType8;
+        const $$createField1_0 = $$createType11;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("files" in $$parsedSource) {
             $$parsedSource["files"] = $$createField1_0($$parsedSource["files"]);
@@ -1819,9 +2090,9 @@ export class SqlResult {
      * @returns {SqlResult}
      */
     static createFrom($$source = {}) {
-        const $$createField1_0 = $$createType3;
-        const $$createField2_0 = $$createType5;
-        const $$createField6_0 = $$createType10;
+        const $$createField1_0 = $$createType6;
+        const $$createField2_0 = $$createType8;
+        const $$createField6_0 = $$createType13;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
             $$parsedSource["columns"] = $$createField1_0($$parsedSource["columns"]);
@@ -1927,6 +2198,13 @@ export class WorkspaceState {
         if (/** @type {any} */(false)) {
             /**
              * @member
+             * @type {string | undefined}
+             */
+            this["resultStatement"] = undefined;
+        }
+        if (/** @type {any} */(false)) {
+            /**
+             * @member
              * @type {PinnedResult[] | undefined}
              */
             this["pinnedResults"] = undefined;
@@ -1941,9 +2219,9 @@ export class WorkspaceState {
      * @returns {WorkspaceState}
      */
     static createFrom($$source = {}) {
-        const $$createField4_0 = $$createType3;
-        const $$createField5_0 = $$createType5;
-        const $$createField11_0 = $$createType12;
+        const $$createField4_0 = $$createType6;
+        const $$createField5_0 = $$createType8;
+        const $$createField12_0 = $$createType15;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("columns" in $$parsedSource) {
             $$parsedSource["columns"] = $$createField4_0($$parsedSource["columns"]);
@@ -1952,23 +2230,26 @@ export class WorkspaceState {
             $$parsedSource["rows"] = $$createField5_0($$parsedSource["rows"]);
         }
         if ("pinnedResults" in $$parsedSource) {
-            $$parsedSource["pinnedResults"] = $$createField11_0($$parsedSource["pinnedResults"]);
+            $$parsedSource["pinnedResults"] = $$createField12_0($$parsedSource["pinnedResults"]);
         }
         return new WorkspaceState(/** @type {Partial<WorkspaceState>} */($$parsedSource));
     }
 }
 
 // Private type creation functions
-const $$createType0 = OutputQueueInfo.createFrom;
-const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = ColumnInfo.createFrom;
-const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = $Create.Array($Create.Any);
-const $$createType5 = $Create.Array($$createType4);
-const $$createType6 = $Create.Array($Create.Any);
-const $$createType7 = SpooledFileInfo.createFrom;
+const $$createType0 = EnhancedSupportStatus.createFrom;
+const $$createType1 = $Create.Nullable($$createType0);
+const $$createType2 = $Create.Array($$createType0);
+const $$createType3 = OutputQueueInfo.createFrom;
+const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = ColumnInfo.createFrom;
+const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = $Create.Array($Create.Any);
 const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = SqlMessage.createFrom;
-const $$createType10 = $Create.Array($$createType9);
-const $$createType11 = PinnedResult.createFrom;
-const $$createType12 = $Create.Array($$createType11);
+const $$createType9 = $Create.Array($Create.Any);
+const $$createType10 = SpooledFileInfo.createFrom;
+const $$createType11 = $Create.Array($$createType10);
+const $$createType12 = SqlMessage.createFrom;
+const $$createType13 = $Create.Array($$createType12);
+const $$createType14 = PinnedResult.createFrom;
+const $$createType15 = $Create.Array($$createType14);

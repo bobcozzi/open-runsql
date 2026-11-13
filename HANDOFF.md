@@ -1,5 +1,8 @@
 # Session handoff — 2026-11-07 night
 
+**Latest handoff:** See `SESSION_2026-11-12_CMD_RUN_HANDOFF.md` for the
+CMD_RUN investigation, source changes, and next steps.
+
 Read this + PROJECT_STATE.md first when resuming.
 
 ## Environment / build cycle

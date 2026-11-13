@@ -90,6 +90,7 @@ export interface SettingsPaneOptions {
 
 export interface SettingsPaneHandle {
     root: HTMLElement;
+    updateSetting: (key: string, value: string) => void;
 }
 
 export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]): SettingsPaneHandle {
@@ -110,6 +111,7 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
 
     let settings: AppSettings = {};
     let selectedKey = "";
+    const externalUpdates = new Map<string, string>();
 
     const itemFor = new Map<string, HTMLLIElement>();
 
@@ -170,6 +172,7 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
         if (def.type === "group") {
             const group = document.createElement("div");
             group.className = "settings-group";
+            group.dataset.settingGroup = def.key;
             for (const control of def.controls ?? []) {
                 const controlRow = document.createElement("div");
                 controlRow.className = "settings-group-row";
@@ -202,7 +205,7 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
                     continue;
                 }
 
-                const field = control.type === "color" || control.type === "number" ? document.createElement("input") : document.createElement("select");
+                const field = control.type === "color" || control.type === "number" || control.type === "text" ? document.createElement("input") : document.createElement("select");
                 field.id = label.htmlFor;
                 field.className = "settings-input";
                 if (field instanceof HTMLInputElement) {
@@ -244,6 +247,13 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
                     })();
                 });
                 controlRow.append(label, field);
+                const hintText = t(`settings.${control.key}.hint`, "");
+                if (hintText) {
+                    const hint = document.createElement("span");
+                    hint.className = "settings-group-hint";
+                    hint.textContent = hintText;
+                    controlRow.appendChild(hint);
+                }
                 group.appendChild(controlRow);
             }
             editor.appendChild(group);
@@ -375,12 +385,21 @@ export function createSettingsPane(opts: SettingsPaneOptions, defs: SettingDef[]
         list.appendChild(li);
     }
 
+    function updateSetting(key: string, value: string): void {
+        externalUpdates.set(key, value);
+        const def = defs.flatMap((item) => [item, ...(item.controls ?? [])]).find((item) => item.key === key);
+        if (!def) return;
+        settings = updatedSettings(def, value);
+        if (selectedKey && defs.find((item) => item.key === selectedKey)?.controls?.some((control) => control.key === key)) select(selectedKey);
+    }
+
     void opts.load().then((s) => {
         settings = s;
+        for (const [key, value] of externalUpdates) updateSetting(key, value);
         if (defs.length > 0) select(defs[0].key);
     }).catch(() => {
         if (defs.length > 0) select(defs[0].key);
     });
 
-    return { root };
+    return { root, updateSetting };
 }

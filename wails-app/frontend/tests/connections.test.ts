@@ -1,6 +1,6 @@
 // Connections pane: profile list + edit form.
 import { describe, expect, it, vi } from "vitest";
-import { createConnectionsPane } from "../src/connections";
+import { createConnectionsPane, matchConnectionProfile } from "../src/connections";
 import { scriptForConnection } from "../src/sessionScript";
 import type { ConnectionProfile } from "../src/types";
 
@@ -28,12 +28,69 @@ function mkPane(profiles: ConnectionProfile[] = [P1, P2], over: Partial<Paramete
     return { pane, opts };
 }
 
-// Field order: Name, Host, User, Password, Schema, Naming, Bidi, TLS, SavePw, ...
+// Field order: Name, Host, User, Password, Schema, Naming, Bidi, CL Support, ...
 // (TLS/SavePw/Preload/SaveScript are span.switch controls, not input/select.)
 const fields = (root: HTMLElement) =>
     [...root.querySelectorAll<HTMLInputElement | HTMLSelectElement>(".conn-field input, .conn-field select, .conn-field .switch")];
 
 describe("connections pane", () => {
+    it("maps legacy enhanced support settings and duplicates the selected mode", async () => {
+        const savedProfiles = [{ ...P1, savePassword: false }, { ...P2, useEnhancedCLSupport: false }];
+        const { pane, opts } = mkPane(savedProfiles);
+        await vi.waitFor(() => expect(pane.root.querySelectorAll(".conn-keys .settings-key")).toHaveLength(2));
+        const mode = pane.root.querySelector<HTMLSelectElement>("#conn-cl-support")!;
+        expect(mode.value).toBe("standard");
+        const name = fields(pane.root)[0] as HTMLInputElement;
+        name.value = "Changed";
+        name.dispatchEvent(new Event("input", { bubbles: true }));
+        pane.root.querySelectorAll<HTMLElement>(".conn-keys .settings-key")[1].click();
+        await vi.waitFor(() => expect(opts.save).toHaveBeenCalledWith("Prod", expect.objectContaining({ clExecutionMode: "standard" })));
+        await vi.waitFor(() => expect((fields(pane.root)[0] as HTMLInputElement).value).toBe("Dev"));
+        expect(mode.value).toBe("standard");
+        [...pane.root.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Duplicate")!.click();
+        expect(await pane.commit()).toBe(true);
+        expect(opts.save).toHaveBeenLastCalledWith("Dev copy", expect.objectContaining({ clExecutionMode: "standard" }));
+        pane.root.remove();
+    });
+
+    it("shows the three CL modes and updates mode-specific help text", async () => {
+        const { pane, opts } = mkPane([{ ...P1, savePassword: false }]);
+        await vi.waitFor(() => expect(pane.root.querySelector(".conn-keys .settings-key")).toBeTruthy());
+        const mode = pane.root.querySelector<HTMLSelectElement>("#conn-cl-support")!;
+        const hint = pane.root.querySelector<HTMLElement>(".conn-cl-support-hint")!;
+        expect([...mode.options].map((option) => option.value)).toEqual(["standard", "qcmdexc", "enhanced"]);
+        expect([...mode.options].map((option) => option.textContent)).toEqual([
+            "Standard (CommandCall)",
+            "SQL Job no message logging (uses QCMDEXC)",
+            "SQL Job with message logging (uses CMD_RUN)",
+        ]);
+        expect(hint.textContent).toContain("remote command job");
+        expect(await pane.commit()).toBe(true);
+        expect(opts.save).not.toHaveBeenCalled();
+        mode.value = "qcmdexc";
+        mode.dispatchEvent(new Event("change", { bubbles: true }));
+        expect(hint.textContent).toContain("SQL job");
+        expect(await pane.commit()).toBe(true);
+        expect(opts.save).toHaveBeenCalledWith("Prod", expect.objectContaining({ clExecutionMode: "qcmdexc" }));
+        mode.value = "enhanced";
+        mode.dispatchEvent(new Event("change", { bubbles: true }));
+        expect(hint.textContent).toContain("CMD_RUN");
+        pane.root.remove();
+    });
+
+    it("migrates the legacy enabled switch to Enhanced", async () => {
+        const { pane } = mkPane([{ ...P1, savePassword: false, useEnhancedCLSupport: true }]);
+        await vi.waitFor(() => expect(pane.root.querySelector(".conn-keys .settings-key")).toBeTruthy());
+        expect(pane.root.querySelector<HTMLSelectElement>("#conn-cl-support")!.value).toBe("enhanced");
+        pane.root.remove();
+    });
+
+    it("uses the selected duplicate and falls back to the host/user match for quick connect", () => {
+        const duplicate = { ...P1, name: "Other", useEnhancedCLSupport: false };
+        expect(matchConnectionProfile([P1, duplicate], " PROD.IBMI ", "cozzi", "Other")).toBe(duplicate);
+        expect(matchConnectionProfile([P1, duplicate], "prod.ibmi", "cozzi")).toBe(P1);
+        expect(matchConnectionProfile([P1, duplicate], "unknown", "cozzi", "Other")).toBeUndefined();
+    });
     it("commits an unchecked auto-restore switch before reconnecting", async () => {
         let saved: ConnectionProfile = { ...P1, savePassword: false, script: "startup", sessionScript: "last session" };
         const { pane } = mkPane([saved], {
@@ -66,7 +123,7 @@ describe("connections pane", () => {
     });
     it("labels the separate startup and automatic session script options", async () => {
         const { pane } = mkPane([{ ...P1, script: "startup", sessionScript: "last session" }]);
-        await vi.waitFor(() => expect(pane.root.querySelector(".conn-script")).toBeTruthy());
+        await vi.waitFor(() => expect(pane.root.querySelector<HTMLTextAreaElement>(".conn-script")?.value).toBe("startup"));
         expect(pane.root.textContent).toContain("Auto Save/Restore SQL Script between connections");
         expect(pane.root.textContent).toContain("Startup SQL Script (does not auto-run)");
         expect(pane.root.textContent).toContain("Ignored when Auto Save/Restore SQL Script is on.");
@@ -91,6 +148,7 @@ describe("connections pane", () => {
         expect((schema as HTMLInputElement).value).toBe("QIWS");
         expect((naming as HTMLSelectElement).value).toBe("system");
         expect((bidi as HTMLSelectElement).value).toBe("");
+        expect(pane.root.querySelector<HTMLSelectElement>("#conn-cl-support")?.value).toBe("standard");
         expect((tls as HTMLInputElement).checked).toBe(true);
         expect((savePw as HTMLInputElement).checked).toBe(true);
         pane.root.remove();

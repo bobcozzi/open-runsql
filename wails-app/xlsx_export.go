@@ -80,10 +80,6 @@ func validateXLSXDimensions(columnCount, rowCount int) error {
 	return nil
 }
 
-func buildXLSX(columns []ColumnInfo, rows [][]any) ([]byte, error) {
-	return buildXLSXWithSettings(columns, rows, AppSettings{})
-}
-
 func buildXLSXWithSettings(columns []ColumnInfo, rows [][]any, settings AppSettings) ([]byte, error) {
 	if err := validateXLSXDimensions(len(columns), len(rows)); err != nil {
 		return nil, err

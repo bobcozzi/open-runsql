@@ -1,7 +1,9 @@
 package bridge
 
 import (
+	"bufio"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 )
@@ -49,6 +51,33 @@ func TestResponseDecodeResultShape(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("rows len = %d, want 2", len(rows))
 	}
+}
+
+func TestReadLoopDispatchesEventsWithoutConsumingResponses(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	events := make(chan map[string]any, 1)
+	responses := make(chan map[string]any, 1)
+	client := &Client{
+		reader:  bufio.NewReader(reader),
+		pending: map[string]chan map[string]any{"go-1": responses},
+		done:    make(chan struct{}),
+	}
+	client.alive.Store(true)
+	client.SetEventHandler(func(event map[string]any) { events <- event })
+	go client.readLoop()
+	if _, err := io.WriteString(writer, `{"event":"enhancedSupportProgress","connectionId":"conn-1"}`+"\n"+`{"id":"go-1","ok":true}`+"\n"); err != nil {
+		t.Fatalf("write protocol lines: %v", err)
+	}
+	_ = writer.Close()
+
+	if event := <-events; event["event"] != "enhancedSupportProgress" || event["connectionId"] != "conn-1" {
+		t.Fatalf("unexpected event: %#v", event)
+	}
+	if response := <-responses; response["id"] != "go-1" || response["ok"] != true {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+	<-client.done
 }
 
 func itoa(v uint64) string {

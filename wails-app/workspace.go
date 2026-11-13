@@ -30,6 +30,7 @@ type WorkspaceState struct {
 	StatusText        string         `json:"statusText"`
 	MessagesHTML      string         `json:"messagesHtml"`
 	ShowingResults    bool           `json:"showingResults"`
+	ResultStatement   string         `json:"resultStatement,omitempty"`
 	PinnedResults     []PinnedResult `json:"pinnedResults,omitempty"`
 }
 
@@ -65,11 +66,13 @@ func (s *WorkspaceStore) emitChanged(connID string) {
 	}
 	s.mu.RLock()
 	st := s.states[connID]
-	s.mu.RUnlock()
 	if st == nil {
+		s.mu.RUnlock()
 		return
 	}
-	s.app.app.Event.Emit("workspace:changed:"+connID, cloneWorkspace(st))
+	snapshot := cloneWorkspace(st)
+	s.mu.RUnlock()
+	s.app.app.Event.Emit("workspace:changed:"+connID, snapshot)
 }
 
 // Update merges a partial update and notifies subscribers.

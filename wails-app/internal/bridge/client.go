@@ -23,6 +23,8 @@ type Client struct {
 	writeMu   sync.Mutex
 	pendingMu sync.Mutex
 	pending   map[string]chan map[string]any
+	eventMu   sync.RWMutex
+	onEvent   func(map[string]any)
 	next      atomic.Uint64
 	done      chan struct{}
 	alive     atomic.Bool
@@ -80,6 +82,12 @@ func Start(javaPath, jarPath string) (*Client, error) {
 
 func (c *Client) Alive() bool { return c.alive.Load() }
 
+func (c *Client) SetEventHandler(handler func(map[string]any)) {
+	c.eventMu.Lock()
+	c.onEvent = handler
+	c.eventMu.Unlock()
+}
+
 func (c *Client) readLoop() {
 	defer close(c.done)
 	for {
@@ -89,6 +97,15 @@ func (c *Client) readLoop() {
 		}
 		var response map[string]any
 		if json.Unmarshal(line, &response) != nil {
+			continue
+		}
+		if event, _ := response["event"].(string); event != "" {
+			c.eventMu.RLock()
+			handler := c.onEvent
+			c.eventMu.RUnlock()
+			if handler != nil {
+				handler(response)
+			}
 			continue
 		}
 		id, _ := response["id"].(string)

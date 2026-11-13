@@ -21,6 +21,7 @@ Connections are remembered automatically and editable in the **Connections** tab
 ## Connection Tabs
 
 - **+** in the Connection Tab opens a new connection tab. Each connection tab keeps its own script, results, and messages.
+- The toolbar shows the current connection's SQL server job as `number/user/name` when available. Select the text to copy it; detached windows show their own connection's job.
 - The bottom bar holds tabs for panels with other features, including: **Messages / Results / Spooled Files / Connections / Settings**. Connections and Settings work even when disconnected.
 
 ## The Scripts input area
@@ -53,3 +54,27 @@ Type SQL statements or CL commands, one or many; a statement ends at `;`.
 ## Settings tab
 
 Theme (System/Light/Dark, mirrors the titlebar dropdown), spool download folder (native picker), default fetch size, double-click action on spooled files, default naming mode, results font size, spool list cap, and delete-confirmation toggle. All apply immediately.
+
+Each connection profile has a **Use Enhanced CL Support** switch. Off (the default for older profiles) runs CL through JT400 CommandCall in a separate host job, without enhanced checks or installation. On checks for `CMD_RUN` when connecting. A verified current or newer installation in the configured **Function Library** under Settings > **Enhanced CL Support** is used, even if a newer one exists elsewhere. Other discovered installations are not used automatically. The Messages tab reports the outcome and available alternatives. Profile changes and manual Function Library changes take effect after reconnecting; existing connections retain their selection. Legacy global CL mode and installation settings do not override the switch.
+
+CL messages can be expanded in Messages to show second-level help and, when available, sender, recipient and timestamp details. Settings > **Enhanced CL Support** > **Show messages in results panel** is off by default. When enabled, the complete `CMD_RUN` message table also appears in Results, including an empty table when there are no messages. The command runs only once. Standard CL continues to use Messages without a `CMD_RUN` result table.
+
+**Function update notifications** controls host changes at connection. **New** means a new installation or a program-only repair; **Updates** means upgrading an eligible older function. A program with no function counts as New, even though repair replaces that program.
+
+- **Always** (the default): prompt for both New and Updates.
+- **New only**: prompt for New; automatically apply Updates.
+- **Updates only**: automatically install or repair New; prompt for Updates.
+- **No notifications, auto install and update**: automatically apply eligible New and Updates without a prompt.
+- **No notifications, no installs or updates**: skip both without a prompt or host writes; the connection remains available.
+
+Automatic choices authorize the corresponding host changes. Messages report automatic starts and outcomes, or that changes were skipped. Existing safety checks still apply; current or newer functions are not changed and unknown versions are not replaced.
+
+If the configured **Function Library** has no installation or an older or unknown version, a prompted dialog can offer eligible alternatives for explicit selection. Only verified installations with numeric versions at least as new as the bundled function are selectable. Selecting a radio button and confirming the additional **OK** prompt rechecks the chosen library, saves it as **Function Library**, and uses it for this connection; cancel makes no selection. Automatic operations use the configured library without selecting alternatives, which are reported in Messages. Neither no-notifications choice opens an alternative selector. Unknown versions are not used or replaced. Function Library defaults to `SQLTOOLS` and must identify an existing library that does not begin with `Q`, except `QGPL`. A routine-only target or a program with a conflicting routine is reported for inspection and is never repaired or replaced automatically. Catalog visibility depends on host authorities. The embedded JDBC bridge must include the `installations` discovery array and repair operation; older bridge builds may not support these features.
+
+When the configured library contains a `CMD_RUN` program but no visible `CMD_RUN` routine, the application can repair it after confirmation or automatically under **Updates only** or **No notifications, auto install and update**. Repair replaces that program, which might belong to another application or owner, and creates the SQL function. The old program moves to `QRPLOBJ`, the new program uses public `AUT(*ALL)`, and new source members and a compiled module are retained. The check cannot establish ownership or rule out hidden objects; coordinate exclusive administrative access throughout, since other jobs are not locked out. Failure can leave partial changes, including a replaced program without a function; there is no rollback or automatic retry. Inspect the target objects and host job log before manual recovery. Enhanced CL remains unavailable after declining or failing repair and never silently falls back to CommandCall.
+
+An eligible older version is upgraded after confirmation or automatically under **New only** or **No notifications, auto install and update**; declining, skipping or failing the upgrade leaves enhanced CL unavailable on that connection. The upgrade replaces the program and SQL routine, may affect dependencies, and can leave partial changes on failure. Existing source members are retained and new version-labeled source members and a module are added. Coordinate exclusive administrative access, review authorities, and inspect the target and host job log before any manual recovery; there is no automatic retry or rollback. A verified newer version is never downgraded. Version metadata does not establish compatibility.
+
+Installation requires authority to create objects in the selected library, the IBM i C++ compiler, and `RUNSQLSTM`. It retains the uploaded sources in `QCOZZISRC` (record length 142) and the compiled module in the selected library. The module and program are created with public `*ALL` authority. Existing `QCOZZISRC` or `CMD_RUN` objects are not replaced. A failed installation may leave source or target objects behind for inspection; resolve those manually before retrying. No command is automatically retried after a SQL-job execution error because it may already have run.
+
+The installer, repair, upgrade and enhanced routine have not yet been validated on an IBM i host; use a separate test library for initial host testing.

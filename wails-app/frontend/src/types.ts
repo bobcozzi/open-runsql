@@ -53,6 +53,16 @@ export interface CLMessage {
     text: string;
     secondLevelText?: string;
     kind: "info" | "warning" | "error";
+    sentTimestamp?: string;
+    sentByUser?: string;
+    fromProgram?: string;
+    fromModule?: string;
+    fromProcedure?: string;
+    fromStatement?: string;
+    toProgram?: string;
+    toModule?: string;
+    toProcedure?: string;
+    toStatement?: string;
 }
 
 export interface CLResult {
@@ -61,6 +71,8 @@ export interface CLResult {
     ok: boolean;
     messages: CLMessage[];
     elapsedMs: number;
+    resultSet?: SqlResult;
+    preserveResults?: boolean;
 }
 
 export interface ConnectResponse {
@@ -177,6 +189,9 @@ export interface ConnectionProfile {
     bidiStringType?: string;
     savePassword?: boolean;
     preloadSpool?: boolean; // undefined = on
+    clExecutionMode?: "standard" | "qcmdexc" | "enhanced";
+    /** Legacy profile field, read only for migration from the old switch. */
+    useEnhancedCLSupport?: boolean;
     saveScript?: boolean; // undefined = on ("Save SQL/CL script between sessions")
     script?: string; // SQL/CL text saved with the profile
     sessionScript?: string;
@@ -187,6 +202,11 @@ export interface ConnectionProfile {
 }
 
 export interface AppSettings {
+    installEnhancedSupport?: boolean;
+    showCLMessagesInResults?: boolean;
+    enhancedSupportLibrary?: string;
+    functionUpdateNotifications?: "always" | "newOnly" | "updatesOnly" | "noneAuto" | "noneSkip";
+    clExecutionMode?: "standard" | "sqlJob" | "enhanced";
     spoolDownloadDir?: string;
     scriptsDir?: string;
     fetchSize?: number;
@@ -210,7 +230,13 @@ export interface AppSettings {
 import * as appBindings from "../bindings/github.com/BobCozzi/open-runsql/wails-app/app.js";
 
 export interface AppBinding {
+    GetSQLCompletions(connectionId: string, kind: string, schema: string, object: string, prefix: string): Promise<import("./sqlCompletion").SQLCompletionItem[]>;
     Connect(req: unknown): Promise<ConnectResponse>;
+    CheckEnhancedSupport(connectionId: string, library: string): Promise<EnhancedSupportStatus>;
+    SelectEnhancedSupport(connectionId: string, library: string): Promise<EnhancedSupportStatus>;
+    InstallEnhancedSupport(connectionId: string, library: string): Promise<EnhancedSupportStatus>;
+    RepairEnhancedSupport(connectionId: string, library: string): Promise<EnhancedSupportStatus>;
+    UpgradeEnhancedSupport(connectionId: string, library: string, expectedInstalledVersion: string): Promise<EnhancedSupportStatus>;
     Disconnect(connectionId: string): Promise<void>;
     CancelSQL(connectionId: string): Promise<void>;
     Run(req: { connectionId: string; text: string; fetchSize: number }): Promise<SqlResult | CLResult>;
@@ -249,7 +275,7 @@ export interface AppBinding {
     ListDetached(): Promise<string[]>;
     GetWorkspace(connectionId: string): Promise<unknown>;
     ListWorkspaces(): Promise<unknown[]>;
-    GetConnectionIdentity(connectionId: string): Promise<{ host: string; user: string }>;
+    GetConnectionIdentity(connectionId: string): Promise<{ host: string; user: string; serverJob?: string }>;
     UpdateEditorText(connectionId: string, text: string): Promise<void>;
     SetInitialEditorText(connectionId: string, text: string): Promise<void>;
     UpdateMessagesHTML(connectionId: string, html: string): Promise<void>;
@@ -260,6 +286,26 @@ export interface AppBinding {
     ClosePinnedWindowsFor(connectionId: string): Promise<void>;
     DetachedConnectionID(): Promise<string>;
     Version(): Promise<string>;
+}
+
+export interface EnhancedSupportStatus {
+    library: string;
+    installed: boolean;
+    programExists: boolean;
+    routineExists: boolean;
+    routineMatches: boolean;
+    version?: string;
+    previousVersion?: string;
+    cppMember?: string;
+    sqlMember?: string;
+    module?: string;
+    installedVersion?: string | null;
+    bundledVersion?: string | null;
+    versionStatus?: string;
+    cppCompilerAvailable?: boolean;
+    configuredTarget?: EnhancedSupportStatus;
+    newerAvailable?: EnhancedSupportStatus | null;
+    installations?: EnhancedSupportStatus[] | null;
 }
 
 export function App(): AppBinding {

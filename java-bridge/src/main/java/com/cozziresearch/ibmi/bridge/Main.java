@@ -162,7 +162,8 @@ public final class Main {
                 sp.setSoTimeout(120_000);
                 sp.setKeepAlive(true);
                 clSystem.setSocketProperties(sp);
-                Session s = new Session(c, clSystem);
+                Session s = new Session(c, clSystem, naming);
+                s.completions = new SQLCompletions(url, props);
                 SESSIONS.put(connectionId, s);
                 out.put("connectionId", connectionId);
                 out.put("databaseProduct", c.getMetaData().getDatabaseProductName());
@@ -170,10 +171,9 @@ public final class Main {
                 out.put("driverName", c.getMetaData().getDriverName());
                 out.put("driverVersion", c.getMetaData().getDriverVersion());
                 out.put("autoCommit", c.getAutoCommit());
-                // IBM i server job (e.g. "709180/QUSER/QZDASOINIT") for ACS-style logging
                 if (c instanceof com.ibm.as400.access.AS400JDBCConnection jc) {
                     try {
-                        out.put("serverJob", nullToEmpty(jc.getServerJobIdentifier()));
+                        out.put("serverJob", formatServerJobIdentifier(jc.getServerJobIdentifier()));
                     } catch (Exception ignored) {}
                 }
             }
@@ -181,6 +181,11 @@ public final class Main {
                 Session s = session(r);
                 closeSession(s);
                 SESSIONS.remove(text(r, "connectionId", ""));
+            }
+            case "sqlCompletions" -> {
+                Session s = session(r);
+                if (s.completions == null) throw new IllegalStateException("SQL completions unavailable");
+                out.set("result", s.completions.lookup(r));
             }
             case "executeSQL" -> {
                 Session s = session(r);
@@ -201,6 +206,44 @@ public final class Main {
             case "executeCL" -> {
                 Session s = session(r);
                 out.set("result", executeCL(s, required(r, "command")));
+            }
+            case "executeSQLJobCL" -> {
+                Session s = session(r);
+                out.set("result", executeSQLJobCL(s, required(r, "command")));
+            }
+            case "executeQcmdexcFunction" -> {
+                Session s = session(r);
+                out.set("result", executeQcmdexcFunction(s, required(r, "command")));
+            }
+            case "executeEnhancedCL" -> {
+                Session s = session(r);
+                out.set("result", executeEnhancedCL(s, required(r, "command"), required(r, "library")));
+            }
+            case "checkEnhancedSupport", "installEnhancedSupport", "upgradeEnhancedSupport", "repairEnhancedSupport" -> {
+                Session s = session(r);
+                String requestedLibrary = required(r, "library");
+                String library = op.equals("checkEnhancedSupport") ? EnhancedSupport.library(requestedLibrary)
+                        : EnhancedSupport.targetLibrary(requestedLibrary);
+                String expectedVersion = op.equals("upgradeEnhancedSupport") ? required(r, "expectedInstalledVersion") : null;
+                if (op.equals("repairEnhancedSupport")) {
+                    JsonNode expected = r.path("expectedState");
+                    if (!expected.isObject() || !expected.path("programExists").isBoolean()
+                            || !expected.path("programExists").booleanValue() || !expected.path("routineExists").isBoolean()
+                            || expected.path("routineExists").booleanValue()) {
+                        throw new IllegalArgumentException("expectedState must contain programExists=true and routineExists=false as booleans");
+                    }
+                }
+                s.lock.lock();
+                try {
+                    closeCursor(s, null);
+                    out.set("result", switch (op) {
+                        case "checkEnhancedSupport" -> EnhancedSupport.discover(s.connection, s.naming, library);
+                        case "installEnhancedSupport" -> EnhancedSupport.install(s.connection, s.naming, library,
+                                message -> emitEnhancedSupportProgress(text(r, "connectionId", ""), library, message));
+                        case "upgradeEnhancedSupport" -> EnhancedSupport.upgrade(s.connection, s.naming, library, expectedVersion);
+                        default -> EnhancedSupport.repair(s.connection, s.naming, library);
+                    });
+                } finally { s.lock.unlock(); }
             }
             case "getCmdXml" -> {
                 Session s = session(r);
@@ -271,6 +314,21 @@ public final class Main {
             default -> throw new IllegalArgumentException("Unknown operation: " + op);
         }
         return out;
+    }
+
+    static String formatServerJobIdentifier(String identifier) {
+        if (identifier == null) return "";
+        String[] parts;
+        if (identifier.contains("/")) {
+            parts = identifier.split("/", -1);
+            if (parts.length != 3) return "";
+            parts = new String[] { parts[0].trim(), parts[1].trim(), parts[2].trim() };
+        } else {
+            if (identifier.length() != 26) return "";
+            parts = new String[] { identifier.substring(20, 26).trim(), identifier.substring(10, 20).trim(), identifier.substring(0, 10).trim() };
+        }
+        return parts[0].matches("[0-9]{6}") && !parts[1].isEmpty() && !parts[2].isEmpty()
+                ? String.join("/", parts) : "";
     }
 
     private static ObjectNode execute(Session s, String sql, int requestedFetchSize) throws Exception {
@@ -356,6 +414,129 @@ public final class Main {
         result.put("ok", ok);
         result.set("messages", messages);
         result.put("elapsedMs", elapsedMs(started));
+        return result;
+    }
+
+    private static ObjectNode executeSQLJobCL(Session s, String command) throws SQLException {
+        long started = System.nanoTime();
+        s.lock.lock();
+        try {
+            closeCursor(s, null);
+            String separator = s.naming.equals("system") ? "/" : ".";
+            try (PreparedStatement statement = s.connection.prepareStatement("CALL QSYS2" + separator + "QCMDEXC(?)")) {
+                s.activeStatement = statement;
+                statement.setString(1, command);
+                statement.execute();
+                ObjectNode result = JSON.createObjectNode();
+                result.put("kind", "cl");
+                result.put("ok", true);
+                result.set("messages", JSON.createArrayNode());
+                result.put("elapsedMs", elapsedMs(started));
+                return result;
+            }
+        } catch (SQLException exception) {
+            throw new SQLException("SQL job CL execution failed; the command may have run. Do not retry automatically: "
+                    + exception.getMessage(), exception.getSQLState(), exception.getErrorCode(), exception);
+        } finally {
+            s.activeStatement = null;
+            s.lock.unlock();
+        }
+    }
+
+    private static ObjectNode executeQcmdexcFunction(Session s, String command) throws SQLException {
+        long started = System.nanoTime();
+        s.lock.lock();
+        try {
+            closeCursor(s, null);
+            try (PreparedStatement statement = s.connection.prepareStatement("VALUES QSYS2.QCMDEXC(?)")) {
+                s.activeStatement = statement;
+                statement.setString(1, command);
+                try (ResultSet resultSet = statement.executeQuery()) {
+                    ObjectNode result = JSON.createObjectNode();
+                    result.put("kind", "cl");
+                    result.put("ok", true);
+                    result.set("messages", JSON.createArrayNode());
+                    if (resultSet.next()) result.put("returnCode", resultSet.getInt(1));
+                    result.put("elapsedMs", elapsedMs(started));
+                    return result;
+                }
+            }
+        } catch (SQLException exception) {
+            throw new SQLException("QSYS2.QCMDEXC function execution failed in the SQL job; the command may have run. Do not retry automatically: "
+                    + exception.getMessage(), exception.getSQLState(), exception.getErrorCode(), exception);
+        } finally {
+            s.activeStatement = null;
+            s.lock.unlock();
+        }
+    }
+
+    private static ObjectNode executeEnhancedCL(Session s, String command, String requestedLibrary) throws SQLException {
+        String library = EnhancedSupport.library(requestedLibrary);
+        long started = System.nanoTime();
+        s.lock.lock();
+        try {
+            closeCursor(s, null);
+            String separator = s.naming.equals("system") ? "/" : ".";
+            String sql = "SELECT * FROM TABLE("
+                    + library + separator + "CMD_RUN(CAST(? AS VARCHAR(32700)), CAST('*RUN' AS VARCHAR(14)))) AS M";
+            try (PreparedStatement statement = s.connection.prepareStatement(sql)) {
+                s.activeStatement = statement;
+                statement.setString(1, command);
+                try (ResultSet rows = statement.executeQuery()) {
+                    ObjectNode result = enhancedCLResult(rows);
+                    result.put("elapsedMs", elapsedMs(started));
+                    return result;
+                } finally {
+                    s.activeStatement = null;
+                }
+            }
+        } catch (SQLException exception) {
+            throw new SQLException("Enhanced CL execution failed; the command may have run. Do not retry automatically: "
+                    + exception.getMessage(), exception.getSQLState(), exception.getErrorCode(), exception);
+        } finally {
+            s.activeStatement = null;
+            s.lock.unlock();
+        }
+    }
+
+    static ObjectNode enhancedCLResult(ResultSet rows) throws SQLException {
+        ObjectNode result = JSON.createObjectNode();
+        ArrayNode messages = JSON.createArrayNode();
+        ResultSetMetaData metadata = rows.getMetaData();
+        ArrayNode data = JSON.createArrayNode();
+        boolean ok = true;
+        while (rows.next()) {
+            String type = nullToEmpty(rows.getString("MSGTYPE")).trim();
+            int severity = rows.getInt("MSGSEV");
+            String normalizedType = type.toUpperCase(Locale.ROOT);
+            if (normalizedType.contains("ESCAPE") || normalizedType.contains("ERROR") || severity >= 30) ok = false;
+            ObjectNode message = JSON.createObjectNode();
+            message.put("id", nullToEmpty(rows.getString("MSGID")).trim());
+            message.put("severity", severity);
+            message.put("typeName", type);
+            message.put("text", nullToEmpty(rows.getString("MSGTEXT")));
+            message.put("secondLevelText", nullToEmpty(rows.getString("SECLVLMSG")));
+            for (String[] field : new String[][] {
+                {"sentTimestamp", "SENT_TIMESTAMP"}, {"sentByUser", "SENT_BY_USER"},
+                {"fromProgram", "SENT_FROM_PGM"}, {"fromModule", "SENT_FROM_MOD"},
+                {"fromProcedure", "SENT_FROM_PROC"}, {"fromStatement", "SENT_FROM_STMT"},
+                {"toProgram", "SENT_TO_PGM"}, {"toModule", "SENT_TO_MOD"},
+                {"toProcedure", "SENT_TO_PROC"}, {"toStatement", "SENT_TO_STMT"}
+            }) {
+                String value = rows.getString(field[1]);
+                if (value != null && !value.isBlank()) message.put(field[0], value.trim());
+            }
+            messages.add(message);
+            data.add(resultRow(rows, metadata));
+        }
+        result.put("kind", "cl");
+        result.put("ok", ok);
+        result.set("messages", messages);
+        ObjectNode resultSet = JSON.createObjectNode();
+        resultSet.put("kind", "rows");
+        resultSet.set("columns", resultColumns(metadata));
+        resultSet.set("rows", data);
+        result.set("resultSet", resultSet);
         return result;
     }
 
@@ -913,21 +1094,7 @@ public final class Main {
         out.put("kind", "rows");
         ArrayNode columns = JSON.createArrayNode();
         if (!c.metadataSent) {
-            for (int i = 1; i <= md.getColumnCount(); i++) {
-                ObjectNode col = JSON.createObjectNode();
-                col.put("name", nullToEmpty(md.getColumnName(i)));
-                col.put("label", nullToEmpty(md.getColumnLabel(i)));
-                col.put("type", md.getColumnType(i));
-                col.put("typeName", nullToEmpty(md.getColumnTypeName(i)));
-                col.put("precision", md.getPrecision(i));
-                col.put("scale", md.getScale(i));
-                col.put("displaySize", md.getColumnDisplaySize(i));
-                col.put("nullable", md.isNullable(i) != ResultSetMetaData.columnNoNulls);
-                col.put("autoIncrement", md.isAutoIncrement(i));
-                col.put("schemaName", nullToEmpty(md.getSchemaName(i)));
-                col.put("tableName", nullToEmpty(md.getTableName(i)));
-                columns.add(col);
-            }
+            columns = resultColumns(md);
             c.metadataSent = true;
             c.columns = columns;
         }
@@ -935,14 +1102,7 @@ public final class Main {
         ArrayNode rows = JSON.createArrayNode();
         int count = 0;
         while (count < fetchSize && rs.next()) {
-            ArrayNode row = JSON.createArrayNode();
-            for (int i = 1; i <= md.getColumnCount(); i++) {
-                int columnType = md.getColumnType(i);
-                Object value = columnType == Types.TIME || columnType == Types.TIME_WITH_TIMEZONE
-                        ? rs.getString(i) : rs.getObject(i);
-                row.add(valueNode(value));
-            }
-            rows.add(row);
+            rows.add(resultRow(rs, md));
             count++;
         }
         c.more = !rs.isAfterLast();
@@ -950,6 +1110,37 @@ public final class Main {
         if (count < fetchSize) c.more = false;
         out.set("rows", rows);
         return out;
+    }
+
+    private static ArrayNode resultColumns(ResultSetMetaData metadata) throws SQLException {
+        ArrayNode columns = JSON.createArrayNode();
+        for (int index = 1; index <= metadata.getColumnCount(); index++) {
+            ObjectNode column = JSON.createObjectNode();
+            column.put("name", nullToEmpty(metadata.getColumnName(index)));
+            column.put("label", nullToEmpty(metadata.getColumnLabel(index)));
+            column.put("type", metadata.getColumnType(index));
+            column.put("typeName", nullToEmpty(metadata.getColumnTypeName(index)));
+            column.put("precision", metadata.getPrecision(index));
+            column.put("scale", metadata.getScale(index));
+            column.put("displaySize", metadata.getColumnDisplaySize(index));
+            column.put("nullable", metadata.isNullable(index) != ResultSetMetaData.columnNoNulls);
+            column.put("autoIncrement", metadata.isAutoIncrement(index));
+            column.put("schemaName", nullToEmpty(metadata.getSchemaName(index)));
+            column.put("tableName", nullToEmpty(metadata.getTableName(index)));
+            columns.add(column);
+        }
+        return columns;
+    }
+
+    private static ArrayNode resultRow(ResultSet rows, ResultSetMetaData metadata) throws SQLException {
+        ArrayNode row = JSON.createArrayNode();
+        for (int index = 1; index <= metadata.getColumnCount(); index++) {
+            int type = metadata.getColumnType(index);
+            Object value = type == Types.TIME || type == Types.TIME_WITH_TIMEZONE
+                    ? rows.getString(index) : rows.getObject(index);
+            row.add(valueNode(value));
+        }
+        return row;
     }
 
     private static com.fasterxml.jackson.databind.JsonNode valueNode(Object value) {
@@ -1103,6 +1294,7 @@ public final class Main {
     }
 
     private static void closeSession(Session s) {
+        if (s.completions != null) s.completions.close();
         s.lock.lock();
         try {
             closeCursor(s, null);
@@ -1160,9 +1352,20 @@ public final class Main {
         }
     }
 
+    private static void emitEnhancedSupportProgress(String connectionId, String library, String message) {
+        ObjectNode event = JSON.createObjectNode();
+        event.put("event", "enhancedSupportProgress");
+        event.put("connectionId", connectionId);
+        event.put("library", library);
+        event.put("message", message);
+        write(event);
+    }
+
     private static final class Session {
         final Connection connection;
         final AS400 clSystem;
+        final String naming;
+        SQLCompletions completions;
         final ReentrantLock lock = new ReentrantLock();
         final Map<String, Cursor> cursors = new ConcurrentHashMap<>();
         volatile Statement activeStatement;
@@ -1170,7 +1373,11 @@ public final class Main {
         // so the host stops producing into the open-list user space.
         volatile SpooledFileList activeSpoolList;
         volatile boolean spoolListCancelled;
-        Session(Connection c, AS400 clSystem) { connection = c; this.clSystem = clSystem; }
+        Session(Connection c, AS400 clSystem, String naming) {
+            connection = c;
+            this.clSystem = clSystem;
+            this.naming = naming;
+        }
     }
     private static final class Cursor {
         final Statement statement;

@@ -35,7 +35,9 @@ type ConnectRequest struct {
 	FetchSize     int    `json:"fetchSize"`
 	// BidiStringType: JT400 "bidi string type" JDBC property. "" = driver
 	// default (no URL change). One of "-1","0","4","5","6","7","8","9","10","11".
-	BidiStringType string `json:"bidiStringType,omitempty"`
+	BidiStringType       string `json:"bidiStringType,omitempty"`
+	CLExecutionMode      string `json:"clExecutionMode,omitempty"`
+	UseEnhancedCLSupport *bool  `json:"useEnhancedCLSupport,omitempty"`
 }
 
 type ConnectResponse struct {
@@ -107,15 +109,27 @@ type CLMessage struct {
 	// SecondLevelText mirrors SECLVLMSG from the cl-prompter CMD_RUN UDTF.
 	SecondLevelText string `json:"secondLevelText"`
 	// Kind mirrors the cl-prompter classifyMessage buckets: error/warning/info.
-	Kind string `json:"kind"`
+	Kind          string `json:"kind"`
+	SentTimestamp string `json:"sentTimestamp,omitempty"`
+	SentByUser    string `json:"sentByUser,omitempty"`
+	FromProgram   string `json:"fromProgram,omitempty"`
+	FromModule    string `json:"fromModule,omitempty"`
+	FromProcedure string `json:"fromProcedure,omitempty"`
+	FromStatement string `json:"fromStatement,omitempty"`
+	ToProgram     string `json:"toProgram,omitempty"`
+	ToModule      string `json:"toModule,omitempty"`
+	ToProcedure   string `json:"toProcedure,omitempty"`
+	ToStatement   string `json:"toStatement,omitempty"`
 }
 
 type CLResult struct {
-	Kind      string      `json:"kind"`
-	Command   string      `json:"command"`
-	OK        bool        `json:"ok"`
-	Messages  []CLMessage `json:"messages"`
-	ElapsedMs int64       `json:"elapsedMs"`
+	Kind            string      `json:"kind"`
+	Command         string      `json:"command"`
+	OK              bool        `json:"ok"`
+	Messages        []CLMessage `json:"messages"`
+	ElapsedMs       int64       `json:"elapsedMs"`
+	ResultSet       *SqlResult  `json:"resultSet,omitempty"`
+	PreserveResults bool        `json:"preserveResults,omitempty"`
 }
 
 type GetCmdXmlRequest struct {
@@ -258,12 +272,14 @@ type ConnectionProfile struct {
 	BidiStringType string `json:"bidiStringType,omitempty"`
 	SavePassword   bool   `json:"savePassword,omitempty"`
 	// PreloadSpool: fetch the spooled-file list at connect (default on).
-	PreloadSpool  *bool  `json:"preloadSpool,omitempty"`
-	Script        string `json:"script,omitempty"`
-	SaveScript    *bool  `json:"saveScript,omitempty"`
-	SessionScript string `json:"sessionScript,omitempty"`
-	PasswordB64   string `json:"passwordB64,omitempty"`
-	LastUsedAt    int64  `json:"lastUsedAt"`
+	PreloadSpool         *bool  `json:"preloadSpool,omitempty"`
+	CLExecutionMode      string `json:"clExecutionMode,omitempty"`
+	UseEnhancedCLSupport *bool  `json:"useEnhancedCLSupport,omitempty"`
+	Script               string `json:"script,omitempty"`
+	SaveScript           *bool  `json:"saveScript,omitempty"`
+	SessionScript        string `json:"sessionScript,omitempty"`
+	PasswordB64          string `json:"passwordB64,omitempty"`
+	LastUsedAt           int64  `json:"lastUsedAt"`
 	// PinnedAt is set by "Move to top": the stable list position override.
 	PinnedAt int64 `json:"pinnedAt,omitempty"`
 	// SortOrder is the user's explicit list position (lower = earlier). Set by
@@ -279,11 +295,17 @@ const profileOrderThreshold = 5
 
 // App is the Wails v3 service. It owns the Java bridge process and the
 // per-connection state. Methods on App are callable from the frontend.
+type bridgeClient interface {
+	Call(string, map[string]any) (map[string]any, error)
+	Alive() bool
+	Close() error
+}
+
 type App struct {
 	app *application.App
 
 	mu        sync.Mutex
-	client    *bridge.Client
+	client    bridgeClient
 	jar       string
 	profileMu sync.Mutex
 
@@ -296,18 +318,44 @@ type App struct {
 }
 
 type connState struct {
-	id        string
-	host      string
-	user      string
-	cursorID  string
-	hasCursor bool
+	opMu                 sync.Mutex
+	id                   string
+	host                 string
+	user                 string
+	serverJob            string
+	cursorID             string
+	hasCursor            bool
+	enhancedLibrary      string
+	clExecutionMode      string
+	useEnhancedCLSupport *bool
+}
+
+type EnhancedSupportStatus struct {
+	Library              string                  `json:"library"`
+	ProgramExists        bool                    `json:"programExists"`
+	RoutineExists        bool                    `json:"routineExists"`
+	RoutineMatches       bool                    `json:"routineMatches"`
+	Installed            bool                    `json:"installed"`
+	Version              string                  `json:"version,omitempty"`
+	PreviousVersion      string                  `json:"previousVersion,omitempty"`
+	CPPMember            string                  `json:"cppMember,omitempty"`
+	SQLMember            string                  `json:"sqlMember,omitempty"`
+	Module               string                  `json:"module,omitempty"`
+	InstalledVersion     string                  `json:"installedVersion"`
+	BundledVersion       string                  `json:"bundledVersion"`
+	VersionStatus        string                  `json:"versionStatus"`
+	CppCompilerAvailable *bool                   `json:"cppCompilerAvailable,omitempty"`
+	ConfiguredTarget     *EnhancedSupportStatus  `json:"configuredTarget,omitempty"`
+	NewerAvailable       *EnhancedSupportStatus  `json:"newerAvailable,omitempty"`
+	Installations        []EnhancedSupportStatus `json:"installations"`
 }
 
 // ConnectionIdentity is the live host/user for a connection (used by the
 // frontend to key per-connection state like the saved script).
 type ConnectionIdentity struct {
-	Host string `json:"host"`
-	User string `json:"user"`
+	Host      string `json:"host"`
+	User      string `json:"user"`
+	ServerJob string `json:"serverJob,omitempty"`
 }
 
 // GetConnectionIdentity returns the live host/user for a connection.
@@ -318,7 +366,7 @@ func (a *App) GetConnectionIdentity(connectionID string) (ConnectionIdentity, er
 	if c == nil {
 		return ConnectionIdentity{}, errors.New("not connected")
 	}
-	return ConnectionIdentity{Host: c.host, User: c.user}, nil
+	return ConnectionIdentity{Host: c.host, User: c.user, ServerJob: c.serverJob}, nil
 }
 
 func NewApp(jar string) *App {
@@ -339,7 +387,7 @@ func (a *App) ServiceShutdown() error {
 	return nil
 }
 
-func (a *App) ensureClient() (*bridge.Client, error) {
+func (a *App) ensureClient() (bridgeClient, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.client != nil && a.client.Alive() {
@@ -348,6 +396,24 @@ func (a *App) ensureClient() (*bridge.Client, error) {
 	c, err := bridge.Start("", a.jar)
 	if err != nil {
 		return nil, fmt.Errorf("could not start JDBC bridge (%s): %w", a.jar, err)
+	}
+	if eventClient, ok := any(c).(interface{ SetEventHandler(func(map[string]any)) }); ok {
+		eventClient.SetEventHandler(func(event map[string]any) {
+			if event["event"] != "enhancedSupportProgress" {
+				return
+			}
+			connectionID, _ := event["connectionId"].(string)
+			if connectionID == "" {
+				return
+			}
+			a.mu.Lock()
+			app := a.app
+			_, connected := a.connections[connectionID]
+			a.mu.Unlock()
+			if app != nil && connected {
+				app.Event.Emit("enhancedSupport:progress", event)
+			}
+		})
 	}
 	a.client = c
 	a.connections = map[string]*connState{}
@@ -365,7 +431,7 @@ func (a *App) closeClient() {
 }
 
 // Version returns the bridge/app version string for the status bar.
-func (a *App) Version() string { return "0.1.0" }
+func (a *App) Version() string { return "0.1.2" }
 
 func profileStorePath() string {
 	dir, err := os.UserConfigDir()
@@ -378,18 +444,23 @@ func profileStorePath() string {
 // --- App settings (spool download dir, ...; persisted next to profiles) ---
 
 type AppSettings struct {
-	SpoolDownloadDir     string `json:"spoolDownloadDir,omitempty"`
-	ScriptsDir           string `json:"scriptsDir,omitempty"`
-	FetchSize            int    `json:"fetchSize,omitempty"`
-	AutoOpenDownloads    *bool  `json:"autoOpenDownloads,omitempty"`   // legacy; superseded by SpoolDblClickAction
-	SpoolDblClickAction  string `json:"spoolDblClickAction,omitempty"` // view | dlPdf | dlText | print ("" = view)
-	DefaultNaming        string `json:"defaultNaming,omitempty"`       // sql | system ("" = sql)
-	ExcelColumnHeading   string `json:"excelColumnHeading,omitempty"`
-	ExcelDateFormat      string `json:"excelDateFormat,omitempty"`      // locale | iso | us | eu ("" = locale)
-	ExcelTimeFormat      string `json:"excelTimeFormat,omitempty"`      // locale | 24h | 12h ("" = locale)
-	ExcelTimestampFormat string `json:"excelTimestampFormat,omitempty"` // locale | iso | us | eu ("" = locale)
-	SpoolMaxRows         int    `json:"spoolMaxRows,omitempty"`         // 0 = unlimited
-	ConfirmSpoolDelete   *bool  `json:"confirmSpoolDelete,omitempty"`   // nil = on
+	InstallEnhancedSupport      bool   `json:"installEnhancedSupport"`
+	ShowCLMessagesInResults     bool   `json:"showCLMessagesInResults"`
+	EnhancedSupportLibrary      string `json:"enhancedSupportLibrary"`
+	FunctionUpdateNotifications string `json:"functionUpdateNotifications"`
+	CLExecutionMode             string `json:"clExecutionMode"`
+	SpoolDownloadDir            string `json:"spoolDownloadDir,omitempty"`
+	ScriptsDir                  string `json:"scriptsDir,omitempty"`
+	FetchSize                   int    `json:"fetchSize,omitempty"`
+	AutoOpenDownloads           *bool  `json:"autoOpenDownloads,omitempty"`   // legacy; superseded by SpoolDblClickAction
+	SpoolDblClickAction         string `json:"spoolDblClickAction,omitempty"` // view | dlPdf | dlText | print ("" = view)
+	DefaultNaming               string `json:"defaultNaming,omitempty"`       // sql | system ("" = sql)
+	ExcelColumnHeading          string `json:"excelColumnHeading,omitempty"`
+	ExcelDateFormat             string `json:"excelDateFormat,omitempty"`      // locale | iso | us | eu ("" = locale)
+	ExcelTimeFormat             string `json:"excelTimeFormat,omitempty"`      // locale | 24h | 12h ("" = locale)
+	ExcelTimestampFormat        string `json:"excelTimestampFormat,omitempty"` // locale | iso | us | eu ("" = locale)
+	SpoolMaxRows                int    `json:"spoolMaxRows,omitempty"`         // 0 = unlimited
+	ConfirmSpoolDelete          *bool  `json:"confirmSpoolDelete,omitempty"`   // nil = on
 	// CtrlEnterRun gates the Ctrl/Cmd+Enter "run current statement" shortcut
 	// (ACS has no such key, so it's opt-in). nil/false = off.
 	CtrlEnterRun *bool `json:"ctrlEnterRun,omitempty"`
@@ -412,7 +483,41 @@ func loadAppSettings() AppSettings {
 	if err == nil {
 		_ = json.Unmarshal(data, &s)
 	}
+	if s.EnhancedSupportLibrary == "" {
+		s.EnhancedSupportLibrary = "SQLTOOLS"
+	}
+	switch s.FunctionUpdateNotifications {
+	case "always", "newOnly", "updatesOnly", "noneAuto", "noneSkip":
+	default:
+		s.FunctionUpdateNotifications = "always"
+	}
+	if s.CLExecutionMode == "" {
+		s.CLExecutionMode = "standard"
+	}
 	return s
+}
+
+var enhancedLibraryPattern = regexp.MustCompile(`^[A-Za-z#$@][A-Za-z0-9_#$@]{0,9}$`)
+
+func enhancedLibrary(value string) (string, error) {
+	if !enhancedLibraryPattern.MatchString(value) {
+		return "", errors.New("library must be a simple IBM i library name of 1 to 10 characters")
+	}
+	library := strings.ToUpper(value)
+	if library == "QTEMP" || library == "QSYS" {
+		return "", errors.New("library must not be QTEMP or QSYS")
+	}
+	return library, nil
+}
+
+func enhancedTargetLibrary(value string) (string, error) {
+	if enhancedLibraryPattern.MatchString(value) {
+		library := strings.ToUpper(value)
+		if strings.HasPrefix(library, "Q") && library != "QGPL" {
+			return "", errors.New("enhanced support target library must not begin with Q except QGPL")
+		}
+	}
+	return enhancedLibrary(value)
 }
 
 func saveAppSettings(s AppSettings) error {
@@ -437,6 +542,48 @@ func (a *App) GetAppSettings() (AppSettings, error) {
 func (a *App) SetAppSetting(key, value string) error {
 	s := loadAppSettings()
 	switch key {
+	case "clExecutionMode":
+		switch value {
+		case "standard", "sqlJob", "enhanced":
+			s.CLExecutionMode = value
+		default:
+			return errors.New("clExecutionMode must be standard, sqlJob, or enhanced")
+		}
+	case "installEnhancedSupport":
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "on":
+			s.InstallEnhancedSupport = true
+		case "off":
+			s.InstallEnhancedSupport = false
+		default:
+			return errors.New("installEnhancedSupport must be on or off")
+		}
+	case "showCLMessagesInResults":
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "on":
+			s.ShowCLMessagesInResults = true
+		case "off":
+			s.ShowCLMessagesInResults = false
+		default:
+			return errors.New("showCLMessagesInResults must be on or off")
+		}
+	case "enhancedSupportLibrary":
+		value = strings.TrimSpace(value)
+		if value == "" {
+			value = "SQLTOOLS"
+		}
+		library, err := enhancedTargetLibrary(value)
+		if err != nil {
+			return err
+		}
+		s.EnhancedSupportLibrary = library
+	case "functionUpdateNotifications":
+		switch value {
+		case "always", "newOnly", "updatesOnly", "noneAuto", "noneSkip":
+			s.FunctionUpdateNotifications = value
+		default:
+			return errors.New("functionUpdateNotifications must be always, newOnly, updatesOnly, noneAuto, or noneSkip")
+		}
 	case "spoolDownloadDir":
 		d := strings.TrimSpace(value)
 		if d != "" {
@@ -767,11 +914,30 @@ func (a *App) GetProfilePassword(name string) (string, error) {
 // preserving name/ordering/password when p carries only the auto-save
 // defaults (name == host, no password). Returns (updated slice, replaced).
 func mergeProfile(profiles []ConnectionProfile, p ConnectionProfile) ([]ConnectionProfile, bool) {
+	selected := -1
 	for i, existing := range profiles {
+		if strings.EqualFold(existing.Name, p.Name) && strings.EqualFold(existing.Host, p.Host) && strings.EqualFold(existing.User, p.User) {
+			selected = i
+			break
+		}
+	}
+	for i, existing := range profiles {
+		if selected >= 0 && i != selected {
+			continue
+		}
 		if strings.EqualFold(existing.Host, p.Host) && strings.EqualFold(existing.User, p.User) {
 			p.Script = existing.Script
 			p.SaveScript = existing.SaveScript
 			p.SessionScript = existing.SessionScript
+			if p.UseEnhancedCLSupport == nil {
+				p.UseEnhancedCLSupport = existing.UseEnhancedCLSupport
+			}
+			if p.CLExecutionMode == "" {
+				p.CLExecutionMode = existing.CLExecutionMode
+				if p.CLExecutionMode == "" && existing.UseEnhancedCLSupport != nil && *existing.UseEnhancedCLSupport {
+					p.CLExecutionMode = "enhanced"
+				}
+			}
 			// Password carries over whenever the incoming profile doesn't
 			// explicitly clear it (SavePassword=false means "don't store").
 			if p.PasswordB64 == "" && p.SavePassword {
@@ -951,6 +1117,16 @@ func (a *App) Connect(req ConnectRequest) (*ConnectResponse, error) {
 	if host == "" || user == "" {
 		return nil, errors.New("host and user are required")
 	}
+	mode := strings.TrimSpace(req.CLExecutionMode)
+	if mode == "" {
+		mode = "standard"
+		if req.UseEnhancedCLSupport != nil && *req.UseEnhancedCLSupport {
+			mode = "enhanced"
+		}
+	}
+	if mode != "standard" && mode != "qcmdexc" && mode != "enhanced" {
+		return nil, errors.New("clExecutionMode must be standard, qcmdexc, or enhanced")
+	}
 	c, err := a.ensureClient()
 	if err != nil {
 		return nil, err
@@ -970,7 +1146,12 @@ func (a *App) Connect(req ConnectRequest) (*ConnectResponse, error) {
 	}
 	connID := str(resp, "connectionId")
 	a.mu.Lock()
-	a.connections[connID] = &connState{id: connID, host: host, user: user}
+	var override *bool
+	if req.UseEnhancedCLSupport != nil {
+		value := *req.UseEnhancedCLSupport
+		override = &value
+	}
+	a.connections[connID] = &connState{id: connID, host: host, user: user, serverJob: str(resp, "serverJob"), clExecutionMode: mode, useEnhancedCLSupport: override}
 	a.mu.Unlock()
 	a.workspace.Update(connID, func(w *WorkspaceState) {
 		w.Label = user + "@" + host
@@ -997,6 +1178,8 @@ func (a *App) Disconnect(connectionID string) error {
 	if c == nil || !known {
 		return nil
 	}
+	state.opMu.Lock()
+	defer state.opMu.Unlock()
 	_, _ = c.Call("disconnect", map[string]any{"connectionId": state.id})
 	a.workspace.remove(connectionID)
 	return nil
@@ -1080,9 +1263,14 @@ func classifyEntry(text string) (mode string, payload string) {
 func (a *App) Run(req RunRequest) (any, error) {
 	a.mu.Lock()
 	c := a.client
-	_, known := a.connections[req.ConnectionID]
+	state, known := a.connections[req.ConnectionID]
 	a.mu.Unlock()
 	if c == nil || !known {
+		return nil, errors.New("not connected")
+	}
+	state.opMu.Lock()
+	defer state.opMu.Unlock()
+	if !a.currentConnection(req.ConnectionID, state, c) {
 		return nil, errors.New("not connected")
 	}
 	mode, payload := classifyEntry(req.Text)
@@ -1095,7 +1283,7 @@ func (a *App) Run(req RunRequest) (any, error) {
 	return a.runSQL(c, req.ConnectionID, payload, req.FetchSize)
 }
 
-func (a *App) runSQL(c *bridge.Client, connID string, sql string, fetchSize int) (*SqlResult, error) {
+func (a *App) runSQL(c bridgeClient, connID string, sql string, fetchSize int) (*SqlResult, error) {
 	if fetchSize <= 0 {
 		fetchSize = 200
 	}
@@ -1113,6 +1301,7 @@ func (a *App) runSQL(c *bridge.Client, connID string, sql string, fetchSize int)
 		w.CursorID = result.CursorID
 		w.More = result.More
 		w.ShowingResults = result.Kind == "rows"
+		w.ResultStatement = sql
 	})
 	return result, nil
 }
@@ -1122,6 +1311,11 @@ func (a *App) Fetch(req FetchRequest) (*SqlResult, error) {
 	state, known := a.connections[req.ConnectionID]
 	a.mu.Unlock()
 	if c == nil || !known {
+		return nil, errors.New("not connected")
+	}
+	state.opMu.Lock()
+	defer state.opMu.Unlock()
+	if !a.currentConnection(req.ConnectionID, state, c) {
 		return nil, errors.New("not connected")
 	}
 	cursorID := req.CursorID
@@ -1384,15 +1578,351 @@ func (a *App) setCursor(connID, cursorID string, more bool) {
 	}
 }
 
-func (a *App) runCL(c *bridge.Client, connID, command string) (*CLResult, error) {
-	resp, err := c.Call("executeCL", map[string]any{
-		"connectionId": connID, "command": command,
+func (a *App) currentConnection(id string, state *connState, client bridgeClient) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.client == client && a.connections[id] == state
+}
+
+func (a *App) clearEnhancedCursor(connID string) {
+	a.setCursor(connID, "", false)
+	a.workspace.Update(connID, func(w *WorkspaceState) {
+		w.CursorID = ""
+		w.More = false
 	})
+}
+
+func (a *App) CheckEnhancedSupport(connectionID, library string) (*EnhancedSupportStatus, error) {
+	return a.enhancedSupport(connectionID, library, "checkEnhancedSupport", "")
+}
+
+func enhancedCurrentOrNewer(status *EnhancedSupportStatus) bool {
+	versionPattern := regexp.MustCompile(`^[0-9]+(\.[0-9]+)*$`)
+	if !status.Installed || (status.VersionStatus != "current" && status.VersionStatus != "newer") ||
+		!versionPattern.MatchString(status.InstalledVersion) || !versionPattern.MatchString(status.BundledVersion) {
+		return false
+	}
+	installed, bundled := strings.Split(status.InstalledVersion, "."), strings.Split(status.BundledVersion, ".")
+	for index := 0; index < len(installed) || index < len(bundled); index++ {
+		left, right := "", ""
+		if index < len(installed) {
+			left = strings.TrimLeft(installed[index], "0")
+		}
+		if index < len(bundled) {
+			right = strings.TrimLeft(bundled[index], "0")
+		}
+		if len(left) != len(right) {
+			return len(left) > len(right)
+		}
+		if left != right {
+			return left > right
+		}
+	}
+	return true
+}
+
+func (a *App) SelectEnhancedSupport(connectionID, library string) (*EnhancedSupportStatus, error) {
+	library, err := enhancedTargetLibrary(strings.TrimSpace(library))
 	if err != nil {
 		return nil, err
 	}
-	raw, _ := resp["result"].(map[string]any)
+	a.mu.Lock()
+	client, state := a.client, a.connections[connectionID]
+	a.mu.Unlock()
+	if client == nil || state == nil {
+		return nil, errors.New("not connected")
+	}
+	state.opMu.Lock()
+	defer state.opMu.Unlock()
+	if !a.currentConnection(connectionID, state, client) {
+		return nil, errors.New("not connected")
+	}
+	probe := &connState{}
+	status, err := a.enhancedSupportLocked(client, probe, connectionID, library, "checkEnhancedSupport", "", false)
+	if err != nil {
+		return nil, err
+	}
+	if status.Library != library || status.ConfiguredTarget == nil || status.ConfiguredTarget.Library != library ||
+		!status.ProgramExists || !status.RoutineExists || !status.RoutineMatches ||
+		!status.ConfiguredTarget.ProgramExists || !status.ConfiguredTarget.RoutineExists || !status.ConfiguredTarget.RoutineMatches ||
+		!enhancedCurrentOrNewer(status.ConfiguredTarget) || status.ConfiguredTarget.InstalledVersion != status.InstalledVersion ||
+		status.ConfiguredTarget.BundledVersion != status.BundledVersion || status.ConfiguredTarget.VersionStatus != status.VersionStatus ||
+		!enhancedCurrentOrNewer(status) || probe.enhancedLibrary != library {
+		return nil, errors.New("selected CMD_RUN is no longer available at a supported version")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.client != client || a.connections[connectionID] != state {
+		return nil, errors.New("not connected")
+	}
+	if err := a.SetAppSetting("enhancedSupportLibrary", library); err != nil {
+		return nil, err
+	}
+	state.enhancedLibrary = library
+	return status, nil
+}
+
+func (a *App) InstallEnhancedSupport(connectionID, library string) (*EnhancedSupportStatus, error) {
+	return a.enhancedSupport(connectionID, library, "installEnhancedSupport", "")
+}
+
+func (a *App) RepairEnhancedSupport(connectionID, library string) (*EnhancedSupportStatus, error) {
+	if strings.TrimSpace(library) == "" {
+		return nil, errors.New("repair library is required")
+	}
+	return a.enhancedSupport(connectionID, library, "repairEnhancedSupport", "")
+}
+
+func (a *App) UpgradeEnhancedSupport(connectionID, library, expectedInstalledVersion string) (*EnhancedSupportStatus, error) {
+	if strings.TrimSpace(library) == "" {
+		return nil, errors.New("upgrade library is required")
+	}
+	if !regexp.MustCompile(`^[0-9]+(\.[0-9]+)*$`).MatchString(expectedInstalledVersion) {
+		return nil, errors.New("expected installed version must be numeric")
+	}
+	return a.enhancedSupport(connectionID, library, "upgradeEnhancedSupport", expectedInstalledVersion)
+}
+
+func (a *App) enhancedSupport(connectionID, library, operation, expectedInstalledVersion string) (*EnhancedSupportStatus, error) {
+	a.mu.Lock()
+	c := a.client
+	state := a.connections[connectionID]
+	a.mu.Unlock()
+	if c == nil || state == nil {
+		return nil, errors.New("not connected")
+	}
+	library = strings.TrimSpace(library)
+	if library == "" {
+		library = "SQLTOOLS"
+	}
+	validate := enhancedLibrary
+	if operation != "checkEnhancedSupport" {
+		validate = enhancedTargetLibrary
+	}
+	library, err := validate(library)
+	if err != nil {
+		return nil, err
+	}
+	state.opMu.Lock()
+	defer state.opMu.Unlock()
+	if !a.currentConnection(connectionID, state, c) {
+		return nil, errors.New("not connected")
+	}
+	result, err := a.enhancedSupportLocked(c, state, connectionID, library, operation, expectedInstalledVersion, true)
+	if err == nil && !a.currentConnection(connectionID, state, c) {
+		return nil, errors.New("not connected")
+	}
+	return result, err
+}
+
+func (a *App) enhancedSupportLocked(c bridgeClient, state *connState, connectionID, library, operation, expectedInstalledVersion string, clearCursor bool) (*EnhancedSupportStatus, error) {
+	if operation != "repairEnhancedSupport" || state.enhancedLibrary == library {
+		state.enhancedLibrary = ""
+	}
+	if clearCursor {
+		a.clearEnhancedCursor(connectionID)
+	}
+	fields := map[string]any{"connectionId": connectionID, "library": library}
+	if operation == "upgradeEnhancedSupport" {
+		fields["expectedInstalledVersion"] = expectedInstalledVersion
+	}
+	if operation == "repairEnhancedSupport" {
+		fields["expectedState"] = map[string]any{"programExists": true, "routineExists": false}
+	}
+	resp, err := c.Call(operation, fields)
+	if err != nil {
+		return nil, err
+	}
+	raw, ok := resp["result"].(map[string]any)
+	if !ok {
+		return nil, errors.New("invalid enhanced support response")
+	}
+	returnedLibrary, err := enhancedLibrary(str2(raw, "library"))
+	if err != nil || (operation != "checkEnhancedSupport" && returnedLibrary != library) {
+		return nil, errors.New("invalid enhanced support response library")
+	}
+	status := &EnhancedSupportStatus{
+		Library: returnedLibrary, ProgramExists: boolVal(raw["programExists"]),
+		RoutineExists: boolVal(raw["routineExists"]), RoutineMatches: boolVal(raw["routineMatches"]),
+		Installed: boolVal(raw["installed"]), Version: str2(raw, "version"),
+		PreviousVersion: str2(raw, "previousVersion"), CPPMember: str2(raw, "cppMember"),
+		SQLMember: str2(raw, "sqlMember"), Module: str2(raw, "module"),
+		InstalledVersion: str2(raw, "installedVersion"), BundledVersion: str2(raw, "bundledVersion"),
+		VersionStatus: str2(raw, "versionStatus"),
+	}
+	if compilerAvailable, ok := raw["cppCompilerAvailable"].(bool); ok {
+		status.CppCompilerAvailable = &compilerAvailable
+	}
+	target, hasTarget := raw["configuredTarget"].(map[string]any)
+	if operation == "checkEnhancedSupport" && !hasTarget {
+		return nil, errors.New("enhanced support discovery requires an updated JDBC bridge")
+	}
+	if hasTarget {
+		targetLibrary, err := enhancedLibrary(str2(target, "library"))
+		if err != nil || targetLibrary != library {
+			return nil, errors.New("invalid enhanced support configured target")
+		}
+		status.ConfiguredTarget = &EnhancedSupportStatus{
+			Library: targetLibrary, ProgramExists: boolVal(target["programExists"]),
+			RoutineExists: boolVal(target["routineExists"]), RoutineMatches: boolVal(target["routineMatches"]),
+			Installed: boolVal(target["installed"]), InstalledVersion: str2(target, "installedVersion"),
+			BundledVersion: str2(target, "bundledVersion"), VersionStatus: str2(target, "versionStatus"),
+		}
+	}
+	if operation == "checkEnhancedSupport" {
+		entries, ok := raw["installations"].([]any)
+		if !ok {
+			return nil, errors.New("enhanced support discovery requires an updated JDBC bridge")
+		}
+		status.Installations = make([]EnhancedSupportStatus, 0, len(entries))
+		seen := make(map[string]bool, len(entries))
+		for _, entry := range entries {
+			candidate, ok := entry.(map[string]any)
+			if !ok {
+				return nil, errors.New("invalid enhanced support installation")
+			}
+			candidateLibrary, err := enhancedLibrary(str2(candidate, "library"))
+			if err != nil || seen[candidateLibrary] || !boolVal(candidate["installed"]) ||
+				!boolVal(candidate["programExists"]) || !boolVal(candidate["routineExists"]) || !boolVal(candidate["routineMatches"]) {
+				return nil, errors.New("invalid enhanced support installation")
+			}
+			seen[candidateLibrary] = true
+			if candidateLibrary == returnedLibrary && status.Installed &&
+				(status.InstalledVersion != str2(candidate, "installedVersion") || status.VersionStatus != str2(candidate, "versionStatus")) {
+				return nil, errors.New("inconsistent enhanced support selected installation")
+			}
+			status.Installations = append(status.Installations, EnhancedSupportStatus{
+				Library: candidateLibrary, ProgramExists: true, RoutineExists: true, RoutineMatches: true, Installed: true,
+				InstalledVersion: str2(candidate, "installedVersion"), BundledVersion: str2(candidate, "bundledVersion"),
+				VersionStatus: str2(candidate, "versionStatus"),
+			})
+		}
+		if status.Installed != seen[returnedLibrary] || (!status.Installed && len(entries) != 0) || status.ConfiguredTarget.Installed != seen[library] ||
+			(status.ConfiguredTarget.Installed && returnedLibrary != library) {
+			return nil, errors.New("inconsistent enhanced support discovery response")
+		}
+	}
+	if alternative, exists := raw["newerAvailable"]; exists && alternative != nil {
+		candidate, ok := alternative.(map[string]any)
+		if !ok {
+			return nil, errors.New("invalid enhanced support newer candidate")
+		}
+		candidateLibrary, err := enhancedLibrary(str2(candidate, "library"))
+		if err != nil || !boolVal(candidate["installed"]) || !regexp.MustCompile(`^[0-9]+(\.[0-9]+)*$`).MatchString(str2(candidate, "installedVersion")) {
+			return nil, errors.New("invalid enhanced support newer candidate")
+		}
+		status.NewerAvailable = &EnhancedSupportStatus{
+			Library: candidateLibrary, ProgramExists: boolVal(candidate["programExists"]),
+			RoutineExists: boolVal(candidate["routineExists"]), RoutineMatches: boolVal(candidate["routineMatches"]),
+			Installed: true, InstalledVersion: str2(candidate, "installedVersion"),
+			BundledVersion: str2(candidate, "bundledVersion"), VersionStatus: str2(candidate, "versionStatus"),
+		}
+	}
+	if operation == "upgradeEnhancedSupport" && (!status.Installed || status.VersionStatus != "current" ||
+		status.PreviousVersion != expectedInstalledVersion || status.Version == "" || status.Version != status.InstalledVersion ||
+		status.CPPMember == "" || status.SQLMember == "" || status.Module == "") {
+		return nil, errors.New("enhanced support upgrade did not complete; inspect the target before retrying")
+	}
+	if operation == "repairEnhancedSupport" && (!status.ProgramExists || !status.RoutineExists || !status.RoutineMatches ||
+		!status.Installed || status.VersionStatus != "current" || status.Version == "" ||
+		!regexp.MustCompile(`^[0-9]+(\.[0-9]+)*$`).MatchString(status.Version) ||
+		status.Version != status.InstalledVersion || status.Version != status.BundledVersion ||
+		status.CPPMember == "" || status.SQLMember == "" || status.Module == "") {
+		return nil, errors.New("enhanced support repair did not complete; partial changes may remain; inspect the target and host job log before manual recovery")
+	}
+	validTarget := operation != "checkEnhancedSupport" || (status.ConfiguredTarget != nil &&
+		status.ProgramExists && status.RoutineExists && status.RoutineMatches &&
+		status.ConfiguredTarget.ProgramExists && status.ConfiguredTarget.RoutineExists && status.ConfiguredTarget.RoutineMatches &&
+		enhancedCurrentOrNewer(status.ConfiguredTarget) &&
+		status.ConfiguredTarget.InstalledVersion == status.InstalledVersion &&
+		status.ConfiguredTarget.BundledVersion == status.BundledVersion &&
+		status.ConfiguredTarget.VersionStatus == status.VersionStatus)
+	_, targetErr := enhancedTargetLibrary(library)
+	compilerAvailable := status.CppCompilerAvailable == nil || *status.CppCompilerAvailable
+	if operation == "checkEnhancedSupport" && !compilerAvailable {
+		state.enhancedLibrary = ""
+		if state.clExecutionMode == "enhanced" {
+			state.clExecutionMode = "qcmdexc"
+		}
+	}
+	if returnedLibrary == library && targetErr == nil && validTarget && enhancedCurrentOrNewer(status) && compilerAvailable {
+		state.enhancedLibrary = returnedLibrary
+	}
+	return status, nil
+}
+
+func (a *App) runCL(c bridgeClient, connID, command string) (*CLResult, error) {
+	showResults := loadAppSettings().ShowCLMessagesInResults
+	fields := map[string]any{
+		"connectionId": connID, "command": command,
+	}
+	a.mu.Lock()
+	state := a.connections[connID]
+	a.mu.Unlock()
+	mode := "standard"
+	if state != nil {
+		if state.clExecutionMode != "" {
+			mode = state.clExecutionMode
+		} else if state.useEnhancedCLSupport != nil && *state.useEnhancedCLSupport {
+			mode = "enhanced"
+		}
+	}
+	operation := "executeCL"
+	switch mode {
+	case "qcmdexc":
+		operation = "executeQcmdexcFunction"
+	case "enhanced":
+		if state.enhancedLibrary == "" {
+			return nil, errors.New("enhanced CL support is unavailable on this connection; reconnect to check or install support")
+		}
+		operation = "executeEnhancedCL"
+		fields["library"] = state.enhancedLibrary
+		a.clearEnhancedCursor(connID)
+	}
+	resp, err := c.Call(operation, fields)
+	if err != nil {
+		if operation != "executeCL" {
+			return nil, fmt.Errorf("CL execution in the SQL job failed; the command may have run; do not retry automatically: %w", err)
+		}
+		return nil, err
+	}
+	result := decodeCLResult(command, resp["result"])
+	preserveResults := operation == "executeEnhancedCL" && result.ResultSet != nil && len(result.ResultSet.Rows) == 0
+	result.PreserveResults = preserveResults
+	if operation != "executeEnhancedCL" || !showResults {
+		result.ResultSet = nil
+	}
+	if !preserveResults {
+		a.workspace.Update(connID, func(w *WorkspaceState) {
+			w.Columns = nil
+			w.Rows = nil
+			w.CursorID = ""
+			w.More = false
+			w.ShowingResults = result.ResultSet != nil
+			w.ResultStatement = ""
+			if result.ResultSet != nil {
+				w.Columns = result.ResultSet.Columns
+				w.Rows = result.ResultSet.Rows
+				w.ResultStatement = command
+			}
+		})
+	}
+	return result, nil
+}
+
+func decodeCLResult(command string, value any) *CLResult {
+	raw, _ := value.(map[string]any)
 	result := &CLResult{Kind: "cl", Command: command, OK: boolVal(raw["ok"]), ElapsedMs: int64Val(raw["elapsedMs"])}
+	result.Messages = []CLMessage{}
+	if raw["resultSet"] != nil {
+		result.ResultSet = decodeSqlResult(raw["resultSet"])
+		if result.ResultSet.Columns == nil {
+			result.ResultSet.Columns = []ColumnInfo{}
+		}
+		if result.ResultSet.Rows == nil {
+			result.ResultSet.Rows = [][]any{}
+		}
+	}
 	for _, m := range anySlice(raw["messages"]) {
 		if mm, ok := m.(map[string]any); ok {
 			sev := intVal(mm["severity"])
@@ -1402,10 +1932,15 @@ func (a *App) runCL(c *bridge.Client, connID, command string) (*CLResult, error)
 				TypeName: typeName, Text: str2(mm, "text"),
 				SecondLevelText: str2(mm, "secondLevelText"),
 				Kind:            classifyCLMessage(sev, typeName),
+				SentTimestamp:   str2(mm, "sentTimestamp"), SentByUser: str2(mm, "sentByUser"),
+				FromProgram: str2(mm, "fromProgram"), FromModule: str2(mm, "fromModule"),
+				FromProcedure: str2(mm, "fromProcedure"), FromStatement: str2(mm, "fromStatement"),
+				ToProgram: str2(mm, "toProgram"), ToModule: str2(mm, "toModule"),
+				ToProcedure: str2(mm, "toProcedure"), ToStatement: str2(mm, "toStatement"),
 			})
 		}
 	}
-	return result, nil
+	return result
 }
 
 // GetCmdXml returns the QCDRCMDD CMDD0200 XML for a command (cl-prompter source).

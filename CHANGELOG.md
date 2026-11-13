@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-11-13 - 0.1.2
+
+### Added
+- Live SQL catalog completion for tables, views, routines, columns, table-function result columns, and named routine parameters. Metadata uses a separate read-only JDBC connection, bounded catalog queries, and a per-connection frontend cache without executing edited SQL or disturbing the active result cursor.
+- Per-connection CL Support choices: Standard (CommandCall), SQL-job QCMDEXC, and SQL-job CMD_RUN with message logging.
+- CMD_RUN component discovery, installation, upgrade, and repair, with versioned metadata, configurable notifications, additional-installation log entries, and install progress reporting. Bundled CMD_RUN version is 0.2.1.
+- QCPPLE prerequisite detection for the C++ component, with a connection-local QCMDEXC fallback when the compiler library is not detected.
+
+### Fixed
+- Display the JDBC SQL job in number/user/name format to the left of Connect.
+- Preserve existing Results when an enhanced CL command returns no message rows; scroll Messages to the latest entries when activated.
+- Preserve leading and interior character-field whitespace while removing fixed-width right padding for display.
+- Reuse a compatible existing QCOZZISRC without overwriting existing members, uploading each new member before adding the next.
+- Render SQL completion and detail popups outside the editor's clipping container with app-theme colors.
+
+### Limitations
+- Live completion does not resolve nested queries/CTEs, user-job QTEMP objects, or later SET SCHEMA changes. Catalog parameter suggestions are not full signature help; metadata availability depends on host release, PTFs, and authority.
+- Releases still require Java 17 or newer. Windows runtime behavior needs a Windows host test; cross-compilation alone is not a runtime test.
+
+## 2026-11-12
+
+### Changed
+- Improved the toolbar Pin icon with a solid pushpin tilted 45 degrees and a heavier needle for better visibility.
+
+### Release
+- Bumped the release version from 0.1.0 to 0.1.1 with separate published Windows x64 and macOS Apple Silicon releases. The Mac app and DMG are signed with Developer ID, notarized by Apple, and include stapled notarization tickets.
+
 ## 2026-11-11
 
 ### Added

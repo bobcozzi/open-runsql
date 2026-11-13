@@ -31,6 +31,21 @@
   </dependencies>
   <build>
     <finalName>ibmi-jdbc-bridge</finalName>
+    <resources>
+      <resource>
+        <directory>${project.basedir}/../src/cmd_run</directory>
+        <targetPath>cmd_run</targetPath>
+        <includes>
+          <include>CMD_RUN.CPP</include>
+          <include>CMD_RUN.SQL</include>
+        </includes>
+        <filtering>false</filtering>
+      </resource>
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>true</filtering>
+      </resource>
+    </resources>
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

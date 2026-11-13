@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 )
@@ -23,6 +24,43 @@ func TestAutoSavePreservesName(t *testing.T) {
 	got, _ := a.ListConnectionProfiles()
 	if len(got) != 1 || got[0].Name != "AID - NAS" {
 		t.Fatalf("name lost: %+v", got)
+	}
+}
+
+func TestAutoSavePreservesEnhancedOverride(t *testing.T) {
+	enabled, disabled := true, false
+	for index, value := range []*bool{nil, &disabled, &enabled} {
+		t.Run(fmt.Sprint(index), func(t *testing.T) {
+			withTempStore(t)
+			app := &App{}
+			profile := ConnectionProfile{Name: "test", Host: "example", User: "user", UseEnhancedCLSupport: value}
+			if err := app.UpdateConnectionProfile("", profile); err != nil {
+				t.Fatal(err)
+			}
+			if err := app.SaveConnectionProfile(ConnectionProfile{Name: "example", Host: "example", User: "user"}); err != nil {
+				t.Fatal(err)
+			}
+			profiles, err := app.ListConnectionProfiles()
+			if err != nil || len(profiles) != 1 {
+				t.Fatalf("profiles: %+v, %v", profiles, err)
+			}
+			got := profiles[0].UseEnhancedCLSupport
+			if (got == nil) != (value == nil) || got != nil && *got != *value {
+				t.Fatalf("override = %v, want %v", got, value)
+			}
+		})
+	}
+}
+
+func TestAutoSaveSelectedDuplicateProfile(t *testing.T) {
+	enabled, disabled := true, false
+	profiles := []ConnectionProfile{
+		{Name: "first", Host: "example", User: "user", UseEnhancedCLSupport: &enabled, Script: "first script"},
+		{Name: "example", Host: "example", User: "user", UseEnhancedCLSupport: &disabled, Script: "second script"},
+	}
+	profiles, _ = mergeProfile(profiles, ConnectionProfile{Name: "example", Host: "example", User: "user", UseEnhancedCLSupport: &disabled})
+	if profiles[0].UseEnhancedCLSupport == nil || !*profiles[0].UseEnhancedCLSupport || profiles[0].Script != "first script" || profiles[1].UseEnhancedCLSupport == nil || *profiles[1].UseEnhancedCLSupport || profiles[1].Script != "second script" {
+		t.Fatalf("autosave changed the wrong profile: %+v", profiles)
 	}
 }
 
