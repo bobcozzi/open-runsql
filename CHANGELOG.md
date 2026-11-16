@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-11-16 - 2.0.0 Preview
+
+### Added
+- Native Go connections to IBM i host servers for the Java-free desktop preview, including SQL execution and CL commands with prompting.
+- IFS Text/Hex viewing, extended attributes on IBM i 7.3 and newer, and native attribute retrieval on older hosts.
+- Native spooled-file access and SCS/AFPDS viewing, with View controls and long-press actions.
+- CL choice popups with on-demand full-list loading and keyboard navigation.
+- Auto theme selection following the system appearance.
+
+### Changed
+- F4 is ignored for SQL; CL prompting remains available for CL commands.
+- Connection loss does not automatically replay SQL or CL commands. Reconnect and verify the host-side outcome before deciding whether to run an operation again.
+
+### Release
+- 2.0.0 is a PREVIEW, not a compatibility guarantee. The native application does not require Java; legacy 0.1.x releases still require Java 17 or newer.
+- macOS Apple Silicon: signed and notarized application and DMG, distributed as `IBMi-RunSQL-2.0.0-macos-arm64.dmg` under `v2.0.0-macos`.
+- Windows x64: `IBMi-RUNSQL.zip` under `v2.0.0-windows`. Extract the ZIP before launching the executable. Microsoft Edge WebView2 Runtime is required. The executable is unsigned and cross-compiled, and has not been runtime-tested on Windows.
+- Application source remains private. iPad support is private development only; no public iPad asset is provided.
+
+### Limitations
+- Host-dependent features are gated by IBM i release, PTF levels, configuration, and authority. IBM i 7.3 or newer alone does not guarantee extended-attribute availability; validate required host services and PTFs on the target system.
+- Preview compatibility is not guaranteed across IBM i releases or PTF levels. Verify the workflows you depend on before deployment.
+
 ## 2026-11-13 - 0.1.2
 
 ### Added

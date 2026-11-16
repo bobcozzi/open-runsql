@@ -11,10 +11,37 @@ private repository.
 Download installers and executables from
 [GitHub Releases](https://github.com/bobcozzi/open-runsql/releases).
 
-| Platform | Latest published release |
-| --- | --- |
-| macOS, Apple Silicon | [0.1.2 macOS](https://github.com/bobcozzi/open-runsql/releases/tag/v0.1.2-macos) |
-| Windows, x64 | [0.1.2 Windows](https://github.com/bobcozzi/open-runsql/releases/tag/v0.1.2-windows) |
+### 2.0.0 Native Preview
+
+**2.0.0 is a PREVIEW release.** The native application connects to IBM i using Go
+and does not require Java. Host feature availability depends on IBM i release,
+PTF levels, configuration, and authority; compatibility is not guaranteed.
+
+| Platform | Preview release | Download |
+| -------- | --------------- | -------- |
+| macOS, Apple Silicon | [2.0.0 macOS](https://github.com/bobcozzi/open-runsql/releases/tag/v2.0.0-macos) | [IBMi-RunSQL-2.0.0-macos-arm64.dmg](https://github.com/bobcozzi/open-runsql/releases/download/v2.0.0-macos/IBMi-RunSQL-2.0.0-macos-arm64.dmg) |
+| Windows, x64 | [2.0.0 Windows](https://github.com/bobcozzi/open-runsql/releases/tag/v2.0.0-windows) | [IBMi-RUNSQL.zip](https://github.com/bobcozzi/open-runsql/releases/download/v2.0.0-windows/IBMi-RUNSQL.zip) |
+
+The macOS application and DMG are signed and notarized. The Windows ZIP contains
+an unsigned, cross-compiled executable that has **not been runtime-tested on
+Windows**. Extract the ZIP before launching the executable; Microsoft Edge
+WebView2 Runtime is required.
+
+The preview includes SQL and CL prompting, IFS Text/Hex viewing, extended
+attributes on IBM i 7.3 and newer with native attribute retrieval on older hosts,
+native SCS/AFPDS spooled-file viewing, View controls with long-press actions,
+CL choice popups with on-demand full lists and keyboard navigation, and an Auto
+theme. F4 is ignored for SQL. Connection loss does not automatically replay SQL
+or CL commands.
+
+iPad support remains private development only. No public iPad asset is provided.
+
+### Legacy Java-Based Releases
+
+| Platform             | Latest published release                                                             |
+| -------------------- | ------------------------------------------------------------------------------------ |
+| macOS, Apple Silicon | [0.1.2 macOS](https://github.com/bobcozzi/open-runsql/releases/tag/v0.1.2-macos)     |
+| Windows, x64         | [0.1.2 Windows](https://github.com/bobcozzi/open-runsql/releases/tag/v0.1.2-windows) |
 
 Choose the `.dmg` or `.exe` under the release's **Assets** section. Where supplied,
 the `.sha256` file contains a checksum for the corresponding download. GitHub's
@@ -23,9 +50,12 @@ documentation, not the application source.
 
 ## Requirements
 
-- The published 0.1.x releases require Java 17 or newer on your PATH.
+- The native 2.0.0 preview does not require Java.
+- Windows 2.0.0 requires Microsoft Edge WebView2 Runtime.
+- The legacy 0.1.x releases require Java 17 or newer on your PATH.
 - An IBM i user profile and network access to the IBM i host servers are required.
-- Later releases may have different requirements; consult their release notes.
+- IBM i release and PTF levels gate host-dependent features. No compatibility
+	guarantees are made for the preview; consult each release's notes.
 
 ## Installation
 
@@ -37,8 +67,13 @@ Mac releases are signed and notarized.
 
 ### Windows
 
-Download the Windows executable and launch it. Windows runtime behavior has not
-yet been fully validated; review the release notes before deployment.
+For 2.0.0, download `IBMi-RUNSQL.zip`, extract it to a local folder, and launch the
+executable from the extracted folder. Microsoft Edge WebView2 Runtime must be
+installed. This preview is unsigned and cross-compiled; Windows runtime behavior
+has not been tested. Review the release notes before deployment.
+
+For legacy 0.1.x releases, download the Windows executable and launch it with
+Java 17 or newer available on your PATH.
 
 ## Connecting
 
