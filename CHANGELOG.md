@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-17 - 2.0.2 Preview
+
+### Added
+- Native Messages panel with queue views, message details, queue descriptions, paging, filters, and inquiry replies.
+- Cancellable IFS View/Download and spooled-file View/Download/Save batches with a persistent progress dialog.
+- Status checkbox picker using IBM QGYOLSPL status values; `*MSGW` maps to the API's `*MESSAGE` value.
+- Shared Save As export for the IFS, Spooled Files, and Messages lists; IFS XLSX exports retain numeric attribute types.
+
+### Changed
+- Simplified User and output-queue filters; improved spool status and output-queue selection controls.
+- Refined IFS and spool detail/progress dialogs and shared panel toolbar visibility.
+
+### Release
+- macOS Apple Silicon: signed, notarized, and stapled `IBMi-RUNSQL.app` DMG under `v2.0.2-macos`.
+- Windows x64: unsigned cross-compiled `IBMi-RUNSQL.zip` under `v2.0.2-windows`; Windows runtime behavior has not been tested on Windows hardware.
+- iPad development build is not included in the public release assets.
+- Application source remains private; public tags point to documentation-only commits.
+
 ## 2026-11-16 - 2.0.0 Preview
 
 ### Added
