@@ -34,6 +34,12 @@ newer with native attribute retrieval on older hosts, SCS/AFPDS spooled-file
 viewing, CL choice popups, and Auto theme selection remain available. Connection
 loss does not automatically replay SQL or CL commands.
 
+Version 2.0.2 builds on 2.0.1's native message queue browsing, adding inquiry
+replies, queue descriptions, and expanded queue controls. It also adds
+cancellable IFS/spool transfers, richer spool status filtering, and list export
+for IFS, Spooled Files, and Messages. Compact folder and paging icons leave more
+room for panel tabs.
+
 iPad support remains private development only. No public iPad asset is provided.
 
 ### Legacy Java-Based Releases
