@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-18 - 2.0.4
+
+### Added
+- Native SQL catalog completion for tables, columns, and routines, with separate controls for keyword and catalog suggestions.
+- SQL/CL statement history per host and user, with Never, Always, and Session retention.
+- Reconnect replaces the host connections without clearing the SQL/CL editor or loaded results. The old result cursor is closed.
+- Shared sorting, column resizing, and long-text scrolling across SQL/CL, IFS, Spooled Files, and Messages. Copy uses selected rows or the displayed table when no rows are selected.
+
+### Changed
+- Settings are grouped by task, with separate table font sizes and a CSV heading preference for file exports.
+- IFS supports per-connection listing modes, dot-prefixed entries in File Server listings, and Copy path on files and folders.
+- Improved SQL/CL editor visibility, script recall persistence, connection summaries, and SQL job log access.
+
+### Release
+- macOS Apple Silicon: signed, notarized, and stapled application and DMG under `v2.0.4-macos`.
+- Windows x64: unsigned, cross-compiled `IBMi-RUNSQL.zip` under `v2.0.4-windows`. WebView2 Runtime is required; Windows runtime testing was not performed.
+- The iPad development build is not included in the public downloads.
+
 ## 2026-11-18 - 2.0.3 Preview
 
 ### Added
