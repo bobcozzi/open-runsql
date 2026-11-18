@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-11-18 - 2.0.3 Preview
+
+### Added
+- Per-connection SPOOLED filters, a page-layout view, and a visible scrollbar in the text spool viewer; Greenbar and page-layout choices persist during the app session.
+- IFS folder navigation by path with GO, session-only sidebar roots, and New Folder creation from the active directory.
+
+### Changed
+- Missing or inaccessible IFS folders leave the current folder open and show a prominent error; the IFS extended-attributes control is shortened to Full.
+
+### Release
+- macOS Apple Silicon: `IBMi-RUNSQL.app`, signed and notarized, distributed in `IBMi-RUNSQL-2.0.3-macos-arm64.dmg`.
+- Windows x64: unsigned, cross-compiled `IBMi-RUNSQL.exe` in `IBMi-RUNSQL.zip`; Windows runtime behavior has not been tested on Windows hardware.
+- iPad development build is not included in public release assets. Application source remains private; public tags point to documentation-only commits.
+
 ## 2026-11-17 - 2.0.2 Preview
 
 ### Added
