@@ -11,7 +11,7 @@ private repository.
 Download installers and executables from
 [GitHub Releases](https://github.com/bobcozzi/open-runsql/releases).
 
-### 2.0.4 Native Release
+### 2.0.5 Native Release
 
 The native application connects to IBM i using Go and does not require Java.
 Host feature availability depends on IBM i release, PTF levels, configuration,
@@ -19,8 +19,8 @@ and authority.
 
 | Platform             | Release                                                                              | Download                                                                                                                                      |
 | -------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| macOS, Apple Silicon | [2.0.4 macOS](https://github.com/bobcozzi/open-runsql/releases/tag/v2.0.4-macos)     | [IBMi-RUNSQL-2.0.4-macos-arm64.dmg](https://github.com/bobcozzi/open-runsql/releases/download/v2.0.4-macos/IBMi-RUNSQL-2.0.4-macos-arm64.dmg) |
-| Windows, x64         | [2.0.4 Windows](https://github.com/bobcozzi/open-runsql/releases/tag/v2.0.4-windows) | [IBMi-RUNSQL.zip](https://github.com/bobcozzi/open-runsql/releases/download/v2.0.4-windows/IBMi-RUNSQL.zip)                                   |
+| macOS, Apple Silicon | [2.0.5 macOS](https://github.com/bobcozzi/open-runsql/releases/tag/v2.0.5-macos)     | [IBMi-RUNSQL-2.0.5-macos-arm64.dmg](https://github.com/bobcozzi/open-runsql/releases/download/v2.0.5-macos/IBMi-RUNSQL-2.0.5-macos-arm64.dmg) |
+| Windows, x64         | [2.0.5 Windows](https://github.com/bobcozzi/open-runsql/releases/tag/v2.0.5-windows) | [IBMi-RUNSQL.zip](https://github.com/bobcozzi/open-runsql/releases/download/v2.0.5-windows/IBMi-RUNSQL.zip)                                   |
 
 The macOS application and DMG are signed and notarized. The Windows ZIP contains
 an unsigned, cross-compiled executable that has **not been runtime-tested on
@@ -34,8 +34,8 @@ newer with native attribute retrieval on older hosts, SCS/AFPDS spooled-file
 viewing, CL choice popups, and Auto theme selection remain available. Connection
 loss does not automatically replay SQL or CL commands.
 
-Version 2.0.4 adds native SQL catalog completion, per-connection statement
-history, Reconnect, grouped settings, and selected-row clipboard export.
+Version 2.0.5 adds read-only Admin views, faster QHST and output-queue listing,
+and German CCSID 273 message text support.
 See the [changelog](CHANGELOG.md) for details.
 
 iPad support remains private development only. No public iPad asset is provided.
@@ -54,8 +54,8 @@ documentation, not the application source.
 
 ## Requirements
 
-- The native 2.0.4 release does not require Java.
-- Windows 2.0.4 requires Microsoft Edge WebView2 Runtime.
+- The native 2.0.5 release does not require Java.
+- Windows 2.0.5 requires Microsoft Edge WebView2 Runtime.
 - The legacy 0.1.x releases require Java 17 or newer on your PATH.
 - An IBM i user profile and network access to the IBM i host servers are required.
 - IBM i release and PTF levels gate host-dependent features. Consult each
@@ -71,7 +71,7 @@ Mac releases are signed and notarized.
 
 ### Windows
 
-For 2.0.4, download `IBMi-RUNSQL.zip`, extract it to a local folder, and launch the
+For 2.0.5, download `IBMi-RUNSQL.zip`, extract it to a local folder, and launch the
 executable from the extracted folder. Microsoft Edge WebView2 Runtime must be
 installed. This executable is unsigned and cross-compiled; Windows runtime behavior
 has not been tested. Review the release notes before deployment.

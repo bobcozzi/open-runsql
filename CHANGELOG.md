@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-19 - 2.0.5
+
+### Added
+- Read-only Admin views for jobs, job queues, output queues, printers, and QHST history, with configurable columns, filters, and shared export and paging controls.
+- German CCSID 273 message text decoding for QHST and message queues.
+
+### Changed
+- Admin views retain their loaded contents when switching panels and refresh explicitly; initial loads and refreshes show loading status.
+- QHST and output-queue lists build their remaining entries asynchronously after the first page, improving responsiveness on large lists.
+- Shared table pagination keeps the More control visible at the right edge, including when scrolling horizontally.
+- Spooled Files printer selection uses the native printer list API.
+
+### Release
+- macOS Apple Silicon: signed, notarized, and stapled application and DMG under `v2.0.5-macos`.
+- Windows x64: unsigned, cross-compiled `IBMi-RUNSQL.zip` under `v2.0.5-windows`. WebView2 Runtime is required; Windows runtime testing was not performed.
+- The iPad development build is not included in the public downloads.
+
 ## 2026-11-18 - 2.0.4
 
 ### Added
