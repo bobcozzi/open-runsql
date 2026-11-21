@@ -67,6 +67,25 @@
 - iPad development build is not included in the public release assets.
 - Application source remains private; public tags point to documentation-only commits.
 
+## 2026-11-20 - 2.0.6
+
+### Added
+- Admin Jobs actions for Display Job, Job Log, call stack inspection, and prompted End Job / End Job Abnormal commands.
+- Cancellable batch confirmation for ending multiple jobs; commands run only after every selected job is confirmed.
+- Persistent, opt-in Admin panel visibility. Existing installations with the former default-on value migrate to off unless the user explicitly enables Admin.
+- Progressive spooled-file text viewing and improved read progress reporting.
+
+### Changed
+- Job Details displays CYYMMDDHHMMSS fields as ISO date/time values without fractional seconds.
+- Job Log displays sequence number first and uses one timestamp column with local-PC time separators.
+- CL command execution and host responses include their execution source in Session Log.
+- Message Queue controls and CL prompting validation were refined.
+
+### Release
+- macOS Apple Silicon: signed, notarized, and stapled `.app` ZIP and DMG under `v2.0.6-macos`.
+- Windows x64: unsigned, cross-compiled executable and ZIP under `v2.0.6-windows`. WebView2 Runtime is required; Windows runtime testing was not performed.
+- The iPad development build is not included in public downloads.
+
 ## 2026-11-16 - 2.0.0 Preview
 
 ### Added
