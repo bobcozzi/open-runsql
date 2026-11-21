@@ -1,5 +1,45 @@
 # Changelog
 
+## 2026-11-21 - 2.0.7
+
+### Added
+- Spooled-file View opens in its own window, with the first pages prefetched
+  while the window opens.
+- *AFPDS spooled files View as page images in the same window; Save Raw saves
+  them with an `.afp` extension.
+- Local cache for finished spooled files, so repeat View and Download of files
+  that can no longer change are served without re-reading the host.
+- Spool attributes (device type, code page) are looked up on demand for View and
+  Save Raw, so the Full Attributes list option is no longer required.
+- Admin Scheduler subpanel listing IBM i Job Scheduler entries.
+- Admin Jobs filter keywords with flexible separators; Enter refreshes.
+
+### Changed
+- Spooled-file raw reads handle compressed and partial-buffer host replies.
+- Download, Print, and PDF are not offered for *AFPDS files; use View or Save Raw.
+
+### Release
+- macOS Apple Silicon: signed, notarized, and stapled application ZIP and DMG
+  under `v2.0.7-macos`.
+- Windows x64: unsigned, cross-compiled `IBMi-RUNSQL.zip` and executable under
+  `v2.0.7-windows`. WebView2 Runtime is required; Windows runtime testing was not
+  performed.
+- The iPad development build is not included in the public downloads.
+
+## 2026-11-20 - 2.0.6
+
+### Added
+- Admin Jobs actions: Display Job, Job Log, Call Stack, End Job, and End Job
+  Abnormal, with sequential prompts for multi-job End Job.
+- Progressive spooled-file text View with progress feedback and local SCS
+  rendering.
+- Session Log records CL commands with execution source and host responses.
+
+### Changed
+- The Admin panel is opt-in and its visibility persists across launches and tabs.
+- Job Log shows SEQNBR first and a combined timestamp; Message Queue controls and
+  CL prompter validation were refined.
+
 ## 2026-11-19 - 2.0.5
 
 ### Added
