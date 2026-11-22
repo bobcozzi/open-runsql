@@ -22,16 +22,20 @@
 - Copy results to the clipboard, or Save as..., as SQL INSERT (one multi-row
   statement) or SQL UPDATE (one statement per row, keyed on the first column).
   The table name is taken from the statement when it reads a single table.
-  Large unselected copies ask for confirmation.
+  Trailing blanks are trimmed from string values. Large unselected copies ask
+  for confirmation.
+- macOS: right-clicking the Dock icon lists the open connection tabs (two or
+  more) so one can be activated, even when the window is minimized.
 
 ### Changed
+- The window title no longer includes "(Native Go)".
 - Spooled-file raw reads handle compressed and partial-buffer host replies.
 - Download, Print, and PDF are not offered for *AFPDS files; use View or Save Raw.
 
 ### Release
 - The 2.0.7 macOS and Windows assets were refreshed on 2026-11-22 with the
-  Auto Recall, Save/Open script, formatter, and SQL INSERT/UPDATE changes
-  above; SHA-256 values changed accordingly.
+  Auto Recall, Save/Open script, formatter, SQL INSERT/UPDATE, and Dock menu
+  changes above; SHA-256 values changed accordingly.
 - macOS Apple Silicon: signed, notarized, and stapled application ZIP and DMG
   under `v2.0.7-macos`.
 - Windows x64: unsigned, cross-compiled `IBMi-RUNSQL.zip` and executable under
