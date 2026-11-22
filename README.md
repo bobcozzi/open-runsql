@@ -38,7 +38,10 @@ loss does not automatically replay SQL or CL commands.
 
 Version 2.0.7 opens spooled-file View in its own window, views AFPDS spooled
 files as page images, caches finished spooled files for repeat views, and adds
-an Admin Scheduler panel and Admin Jobs filter improvements.
+an Admin Scheduler panel and Admin Jobs filter improvements. The refreshed
+2.0.7 build also adds Auto Recall of the editor session, a Save/Open script
+dialog for local, IFS, and source member destinations, and copy or Save as SQL
+INSERT/UPDATE statements from results.
 See the [changelog](CHANGELOG.md) for details.
 
 iPad support remains private development only. No public iPad asset is provided.

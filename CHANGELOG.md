@@ -13,12 +13,25 @@
   Save Raw, so the Full Attributes list option is no longer required.
 - Admin Scheduler subpanel listing IBM i Job Scheduler entries.
 - Admin Jobs filter keywords with flexible separators; Enter refreshes.
+- Auto Recall: the SQL/CL editor session is saved and restored from the IBM i
+  IFS or from the local PC only. A differing copy prompts Add/Replace, and an
+  empty editor never overwrites a saved session.
+- Save/Open script dialog with local, IFS file, and source member
+  destinations; Ctrl/Cmd+S saves to the last destination.
+- SQL/CL formatter and a textual CL message list.
+- Copy results to the clipboard, or Save as..., as SQL INSERT (one multi-row
+  statement) or SQL UPDATE (one statement per row, keyed on the first column).
+  The table name is taken from the statement when it reads a single table.
+  Large unselected copies ask for confirmation.
 
 ### Changed
 - Spooled-file raw reads handle compressed and partial-buffer host replies.
 - Download, Print, and PDF are not offered for *AFPDS files; use View or Save Raw.
 
 ### Release
+- The 2.0.7 macOS and Windows assets were refreshed on 2026-11-22 with the
+  Auto Recall, Save/Open script, formatter, and SQL INSERT/UPDATE changes
+  above; SHA-256 values changed accordingly.
 - macOS Apple Silicon: signed, notarized, and stapled application ZIP and DMG
   under `v2.0.7-macos`.
 - Windows x64: unsigned, cross-compiled `IBMi-RUNSQL.zip` and executable under
