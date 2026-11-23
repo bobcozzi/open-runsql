@@ -1,3 +1,15 @@
+<p align="center">
+  <img src="media/iDive-splash.png" alt="iDive for IBM i" width="640">
+</p>
+
+> **IBMi-RUNSQL is now iDive for IBM i.**
+> New releases, starting at 1.0.0, are published at
+> [bobcozzi/IBMi-iDive](https://github.com/bobcozzi/IBMi-iDive).
+> Download the latest build from the
+> [iDive release page](https://github.com/bobcozzi/IBMi-iDive/releases).
+> This repository keeps the earlier 0.1.x and 2.0.x releases for reference
+> and will not receive new releases.
+
 # IBM i RunSQL
 
 A desktop SQL and CL client for IBM i by Bob Cozzi.
@@ -105,4 +117,4 @@ repository's Git tree.
 
 Current application source code is private. The public Git history and release
 tags now contain distribution documentation only. Copies of source code obtained
-before this change are not affected by the repository migration.
+before this change are not affected by the repository migration.
